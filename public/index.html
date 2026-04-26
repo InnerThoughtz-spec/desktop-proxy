@@ -7,8 +7,15 @@
 <title>Desktop</title>
 <link rel="stylesheet" href="/css/main.css">
 <script src="/baremux/index.js"></script>
+<!-- Engine 1: Ultraviolet (mature, default) -->
 <script src="/uv/uv.bundle.js" defer></script>
 <script src="/uv/uv.config.js" defer></script>
+<!-- Engine 2: Scramjet (experimental). Order matters: codecs -> config -> bundle.
+     The 404 handler in apps.js will hide the Scramjet option if any of these
+     fail to load (e.g. running an older clone without `npm install scramjet`). -->
+<script src="/scramjet/scramjet.codecs.js" defer></script>
+<script src="/scram.config.js" defer></script>
+<script src="/scramjet/scramjet.bundle.js" defer></script>
 <script>
   // Register SW + set bare-mux transport to our local bare-server-node.
   (async () => {

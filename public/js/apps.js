@@ -243,9 +243,13 @@
           return;
         }
         try { await ready; } catch (e) { showError(t, 'Proxy worker failed to start: ' + e.message); return; }
-        const cfg = window.__uv$config;
-        if (!cfg || !cfg.encodeUrl) { showError(t, 'UV config not loaded'); return; }
-        const target = cfg.prefix + cfg.encodeUrl(url);
+        // Resolve the active engine *at navigation time* — the user can flip
+        // engines while the browser is open and the next nav should pick it up.
+        const eng = OS.proxy.engineFor(OS.proxy.getEngine());
+        if (!eng.available()) { showError(t, eng.label + ' engine not loaded'); return; }
+        const target = eng.prefix() + eng.encodeUrl(url);
+        t._engineId = eng.id;  // remember which engine this iframe lives in
+        t._enginePrefix = eng.prefix();
 
         if (!t.iframe) {
           const f = document.createElement('iframe');
@@ -278,13 +282,16 @@
           const win = t.iframe.contentWindow;
           const doc = t.iframe.contentDocument;
           if (!win || !doc) { renderTabStrip(); return; }
-          const cfg = window.__uv$config;
-          const prefix = location.origin + cfg.prefix;
+          // Decode through whichever engine this tab was launched under, not
+          // whichever is currently selected — otherwise flipping the engine
+          // mid-session would break URL parsing on already-open tabs.
+          const eng = OS.proxy.engineFor(t._engineId || OS.proxy.getEngine());
+          const prefix = location.origin + (t._enginePrefix || eng.prefix());
           const loc = win.location.href;
           if (loc.startsWith(prefix)) {
             const encoded = loc.slice(prefix.length);
             try {
-              const real = cfg.decodeUrl(encoded);
+              const real = eng.decodeUrl(encoded);
               t.url = real;
               t.title = (doc.title && doc.title.trim()) || shortHost(real);
               t.favicon = realPageFavicon(doc, real) || faviconFor(real);
@@ -1100,25 +1107,58 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
   }
 
   function renderProxy(main) {
+    const engines = OS.proxy.list();
+    const active = OS.proxy.getEngine();
+    const radios = engines.map((e) => `
+      <label class="settings-radio" style="display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:8px;background:var(--panel-hi);margin-bottom:6px;${e.available ? '' : 'opacity:0.5;'}">
+        <input type="radio" name="engine" value="${e.id}" ${e.id === active ? 'checked' : ''} ${e.available ? '' : 'disabled'}>
+        <span style="flex:1">
+          <div style="font-weight:600">${e.label}</div>
+          <div style="font-size:11px;color:var(--fg-dim)">
+            ${e.id === 'uv' ? 'Mature, stock — runs through bare-server-node v3.' : ''}
+            ${e.id === 'scramjet' ? 'Experimental successor by MercuryWorkshop. Faster rewriting in some cases.' : ''}
+            ${!e.available ? ' · not loaded' : ''}
+          </div>
+        </span>
+      </label>`).join('');
     main.innerHTML = `
       <h2>Proxy</h2>
+      <h3>Engine</h3>
+      <div class="settings-row" style="display:block">
+        <div class="desc" style="margin-bottom:8px">
+          Pick the proxy engine used for new browser tabs. Already-open tabs stay
+          on whichever engine launched them. Changes take effect immediately —
+          open a new tab to try it out.
+        </div>
+        <div data-role="engines">${radios}</div>
+      </div>
+      <h3>Service worker</h3>
       <div class="settings-row">
-        <div><div class="label">Service worker</div><div class="desc" id="sw-status">checking…</div></div>
+        <div><div class="label">Status</div><div class="desc" id="sw-status">checking…</div></div>
         <div><button class="btn ghost" data-act="reg">Re-register</button></div>
       </div>
       <div class="settings-row">
         <div><div class="label">Clear proxy data</div><div class="desc">Unregister service worker and clear caches.</div></div>
         <div><button class="btn ghost" data-act="clear">Clear</button></div>
       </div>
-      <h3>Config</h3>
-      <pre style="background: var(--panel-hi); padding: 10px; border-radius: 8px; font-size: 12px; overflow:auto; max-height:180px;"></pre>`;
+      <h3>Active engine config</h3>
+      <pre data-role="cfg" style="background: var(--panel-hi); padding: 10px; border-radius: 8px; font-size: 12px; overflow:auto; max-height:180px;"></pre>`;
     const statusEl = main.querySelector('#sw-status');
-    const pre = main.querySelector('pre');
+    const pre = main.querySelector('[data-role="cfg"]');
     updateStatus();
-    pre.textContent = JSON.stringify({
-      prefix: window.__uv$config?.prefix,
-      bare: window.__uv$config?.bare,
-    }, null, 2);
+    refreshCfg();
+
+    function refreshCfg() {
+      const eng = OS.proxy.engineFor(OS.proxy.getEngine());
+      const cfg = eng.config();
+      pre.textContent = JSON.stringify({
+        engine: eng.id,
+        prefix: cfg && cfg.prefix,
+        bundle: cfg && cfg.bundle,
+        codec: cfg && cfg.codec ? '<binding present>' : undefined,
+        bare: cfg && cfg.bare,
+      }, null, 2);
+    }
 
     async function updateStatus() {
       if (!('serviceWorker' in navigator)) { statusEl.textContent = 'unsupported in this browser'; return; }
@@ -1128,6 +1168,11 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       else if (reg.installing) statusEl.textContent = 'installing…';
       else statusEl.textContent = 'registered (pending)';
     }
+    main.addEventListener('change', (e) => {
+      const r = e.target.closest('input[name="engine"]'); if (!r) return;
+      OS.proxy.setEngine(r.value);
+      refreshCfg();
+    });
     main.addEventListener('click', async (e) => {
       const t = e.target.closest('[data-act]'); if (!t) return;
       if (t.dataset.act === 'reg') {
@@ -1495,7 +1540,11 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
     return new Promise((resolve, reject) => {
       const started = Date.now();
       (function tick() {
-        const cfgReady = !!window.__uv$config;
+        // Wait for whichever engine is selected. UV is always available;
+        // Scramjet is conditional on the npm install having shipped.
+        const id = OS.proxy.getEngine();
+        const eng = OS.proxy.engineFor(id);
+        const cfgReady = !!eng && !!eng.config();
         const swReady = !!(navigator.serviceWorker && navigator.serviceWorker.controller);
         const proxyReady = window.__proxyReady === true;
         if (cfgReady && swReady && proxyReady) return resolve();

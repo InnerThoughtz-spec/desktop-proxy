@@ -30,6 +30,16 @@ const uvDist = path.dirname(require.resolve('@titaniumnetwork-dev/ultraviolet/pa
 const uvPath = path.join(uvDist, 'dist');
 const bareMuxDist = path.join(__dirname, 'node_modules', '@mercuryworkshop', 'bare-mux', 'dist');
 const bareModuleDist = path.join(__dirname, 'node_modules', '@mercuryworkshop', 'bare-as-module3', 'dist');
+// Optional second proxy engine. We mount it so users can A/B compare against UV
+// at runtime via a Settings → Proxy → "engine" toggle. The npm package may not
+// be present in older clones — guard the resolve so the server still boots.
+let scramjetPath = null;
+try {
+  scramjetPath = path.join(
+    path.dirname(require.resolve('@mercuryworkshop/scramjet/package.json')),
+    'dist'
+  );
+} catch (_) { /* scramjet not installed, only UV will be available */ }
 
 const bare = createBareServer(BARE_PREFIX, {
   logErrors: true,
@@ -62,6 +72,21 @@ function jsStatic(dir) {
 app.use('/uv/', jsStatic(uvPath));
 app.use('/baremux/', jsStatic(bareMuxDist));
 app.use('/baremodule/', jsStatic(bareModuleDist));
+// Static for the second engine. Routing prefix for Scramjet-proxied URLs is
+// '/scram/' (set in public/scram.config.js) — kept distinct from this asset
+// path so the SW dispatcher can tell asset fetches apart from proxy fetches.
+if (scramjetPath) app.use('/scramjet/', jsStatic(scramjetPath));
+
+// Useful for the Settings UI: report which engines the server can actually
+// serve, so the page doesn't offer Scramjet if it isn't installed.
+app.get('/api/engines', (_req, res) => {
+  res.json({
+    engines: [
+      { id: 'uv', label: 'Ultraviolet', available: true },
+      { id: 'scramjet', label: 'Scramjet', available: !!scramjetPath },
+    ],
+  });
+});
 
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 

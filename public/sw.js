@@ -1,8 +1,22 @@
+// --- Engine 1: Ultraviolet (mature, default) ---
 importScripts('/uv/uv.bundle.js');
 importScripts('/uv/uv.config.js');
 importScripts(__uv$config.sw || '/uv/uv.sw.js');
 
 const uv = new UVServiceWorker();
+
+// --- Engine 2: Scramjet (experimental successor) ---
+// Optional — wrapped in try/catch so a missing scramjet install (e.g. on a
+// stripped-down deploy) doesn't break the UV path. If anything below throws,
+// `scram` stays null and the dispatcher just won't route to it.
+let scram = null;
+try {
+  importScripts('/scramjet/scramjet.codecs.js');   // defines self.__scramjet$codecs
+  importScripts('/scram.config.js');               // defines self.__scramjet$config
+  importScripts('/scramjet/scramjet.bundle.js');   // page-side rewriters used by the SW too
+  importScripts('/scramjet/scramjet.worker.js');   // exposes self.ScramjetServiceWorker
+  scram = new self.ScramjetServiceWorker();
+} catch (e) { console.warn('[sw] Scramjet engine unavailable:', e && e.message); }
 
 // --- Instrument UV's bareClient so we can actually SEE errors that UV's
 // internal catch-all would otherwise swallow into a blank Response(500). ---
@@ -367,20 +381,55 @@ const STRIP_HEADERS = [
 // Response with any body for these throws. Cf. 'null body status' in WHATWG.
 const NULL_BODY_STATUSES = new Set([101, 204, 205, 304]);
 
+// Active engine identifiers and their routing prefixes. Adding a new engine
+// here is a 4-step ritual: importScripts at top, ENGINES.<id> route here,
+// ENGINES + the toggle UI in apps.js. Keep these aligned.
+function uvPrefix() { return (self.__uv$config && self.__uv$config.prefix) || '/service/'; }
+function scramPrefix() { return (self.__scramjet$config && self.__scramjet$config.prefix) || '/scram/'; }
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   SW_COUNTERS.fetchEvents++;
 
   // Diagnostic endpoint so page can read recent SW errors + counters.
   if (req.url === location.origin + '/__sw_diag') {
-    event.respondWith(new Response(JSON.stringify({ errors: SW_ERRORS, counters: SW_COUNTERS, lastProxied: SW_LAST_PROXIED }), {
-      status: 200, headers: { 'content-type': 'application/json' },
-    }));
+    event.respondWith(new Response(JSON.stringify({
+      errors: SW_ERRORS,
+      counters: SW_COUNTERS,
+      lastProxied: SW_LAST_PROXIED,
+      engines: { uv: !!uv, scramjet: !!scram },
+    }), { status: 200, headers: { 'content-type': 'application/json' } }));
+    return;
+  }
+
+  // --- Engine dispatch by URL prefix ---
+  // Decide BEFORE awaiting anything (FetchEvent.respondWith() must be called
+  // synchronously in the listener turn, otherwise the browser falls back to
+  // the network).
+  const url = req.url;
+  const isUV = url.startsWith(location.origin + uvPrefix());
+  const isScram = !isUV && scram && url.startsWith(location.origin + scramPrefix());
+
+  // Scramjet path — let its own SW handler do everything (HTML rewrite, JS
+  // rewrite, header stripping, etc). We deliberately do NOT pipe through our
+  // UV-flavoured response post-processing here so the comparison against UV
+  // is fair: both engines run their stock pipeline.
+  if (isScram) {
+    event.respondWith((async () => {
+      try { return await scram.fetch(event); }
+      catch (err) {
+        logSwError('scram.fetch', err, { url: req.url, method: req.method });
+        return new Response(JSON.stringify({ error: 'scramjet_failed', detail: String(err && err.message || err) }), {
+          status: 502, statusText: 'Bad Gateway',
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+    })());
     return;
   }
 
   event.respondWith((async () => {
-    if (!req.url.startsWith(location.origin + __uv$config.prefix)) {
+    if (!isUV) {
       return fetch(req);
     }
     SW_COUNTERS.proxied++;

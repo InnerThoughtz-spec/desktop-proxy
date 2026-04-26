@@ -934,6 +934,55 @@
     bindDesktopEmptySpace();
   }
 
+  // ---- Proxy engine selection ----
+  // Two engines are available: 'uv' (Ultraviolet, mature, default) and
+  // 'scramjet' (experimental successor). The user can flip between them at
+  // runtime via Settings → Proxy → Engine. This is the single source of
+  // truth that the browser app, the SW dispatcher, and the wait-for-ready
+  // helper all consult.
+  //
+  // We persist the choice to localStorage (not the IDB-backed app state)
+  // because it needs to survive a hard reload AND be readable synchronously
+  // when the browser app is mounting its first iframe.
+  const PROXY_KEY = 'desktop.proxy.engine';
+  const PROXY_ENGINES = {
+    uv: {
+      id: 'uv',
+      label: 'Ultraviolet',
+      // All four read at call time so we don't capture undefined globals
+      // before the bundles have finished loading.
+      config:    () => self.__uv$config || null,
+      prefix:    () => (self.__uv$config && self.__uv$config.prefix) || '/service/',
+      encodeUrl: (u) => self.__uv$config.encodeUrl(u),
+      decodeUrl: (u) => self.__uv$config.decodeUrl(u),
+      available: () => !!(self.__uv$config && self.__uv$config.encodeUrl),
+    },
+    scramjet: {
+      id: 'scramjet',
+      label: 'Scramjet',
+      config:    () => self.__scramjet$config || null,
+      prefix:    () => (self.__scramjet$config && self.__scramjet$config.prefix) || '/scram/',
+      // Scramjet's encoder lives on the bundle global; the codec is wired in
+      // its config so calling encodeUrl bottoms out at codec.encode internally.
+      encodeUrl: (u) => self.__scramjet$bundle.rewriters.url.encodeUrl(u),
+      decodeUrl: (u) => self.__scramjet$bundle.rewriters.url.decodeUrl(u),
+      available: () => !!(self.__scramjet$bundle && self.__scramjet$bundle.rewriters),
+    },
+  };
+  function getEngineId() {
+    try {
+      const v = localStorage.getItem(PROXY_KEY);
+      if (v && PROXY_ENGINES[v]) return v;
+    } catch (_) {}
+    return 'uv';
+  }
+  function setEngineId(id) {
+    if (!PROXY_ENGINES[id]) return false;
+    try { localStorage.setItem(PROXY_KEY, id); } catch (_) {}
+    try { window.dispatchEvent(new CustomEvent('proxyenginechange', { detail: { id } })); } catch (_) {}
+    return true;
+  }
+
   // ---- Expose ----
   window.DesktopOS = {
     state, setState, subscribe,
@@ -947,6 +996,13 @@
     addShortcut, updateShortcut, removeShortcut, reloadShortcuts,
     addDesktopIcon, removeDesktopIcon, moveDesktopIcon, hasDesktopIcon: _hasDesktopIcon,
     showContextMenu, hideContextMenu,
+    proxy: {
+      engines: PROXY_ENGINES,
+      engineFor: (id) => PROXY_ENGINES[id] || PROXY_ENGINES.uv,
+      getEngine: getEngineId,
+      setEngine: setEngineId,
+      list: () => Object.values(PROXY_ENGINES).map((e) => ({ id: e.id, label: e.label, available: e.available() })),
+    },
   };
   // Shorter alias used by apps.js
   window.OS = window.DesktopOS;
