@@ -16,9 +16,10 @@
       // InnerStream: rounded screen frame with a tiny "i" (dot+stem) on the
       // left and a filled play triangle on the right. Reads as "i ▶".
       stream: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="8.6" r=".7" fill="currentColor" stroke="none"/><path d="M8 11v5.5"/><path d="M13 9.2l5.4 2.8L13 14.8z" fill="currentColor"/></svg>`,
-      // InnerArcade: rounded controller body with a d-pad cross on the left
-      // and 4 face buttons on the right. Reads as a gamepad silhouette.
-      arcade: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><path d="M5 8h14a3 3 0 013 3v3a4 4 0 01-7.2 2.4l-.6-.8h-4.4l-.6.8A4 4 0 012 14v-3a3 3 0 013-3z"/><path d="M7.5 12h3M9 10.5v3"/><circle cx="15.5" cy="11" r=".7" fill="currentColor" stroke="none"/><circle cx="17.5" cy="13" r=".7" fill="currentColor" stroke="none"/><circle cx="13.5" cy="13" r=".7" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15" r=".7" fill="currentColor" stroke="none"/></svg>`,
+      // InnerArcade: classic arcade joystick — base, stick, ball top, two
+      // face buttons. Tall enough to fill the icon viewbox without looking
+      // squished at small sizes.
+      arcade: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><circle cx="12" cy="5" r="2.5" fill="currentColor" stroke="none"/><path d="M12 7.5v8"/><rect x="3" y="15" width="18" height="6" rx="2"/><circle cx="8" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="18" r="1" fill="currentColor" stroke="none"/></svg>`,
     };
   })();
 
@@ -2199,10 +2200,17 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         try {
           await waitForUV(15000);
           const eng = OS.proxy.engineFor(OS.proxy.getEngine());
-          if (!eng || typeof eng.encodeUrl !== 'function') {
+          if (!eng || typeof eng.encodeUrl !== 'function' || typeof eng.prefix !== 'function') {
             throw new Error('proxy engine not available');
           }
-          proxiedUrl = eng.encodeUrl(g.url);
+          if (typeof eng.available === 'function' && !eng.available()) {
+            throw new Error(`${eng.label || 'Proxy'} engine not loaded yet — try again in a moment, or switch engines in Settings → Proxy.`);
+          }
+          // CRITICAL: encodeUrl returns the *encoded* part only (e.g. base64).
+          // The SW only intercepts URLs that begin with the engine's prefix
+          // (e.g. /service/ for UV, /scram/ for Scramjet) — without it the
+          // request hits Express directly and serves our 404 page.
+          proxiedUrl = eng.prefix() + eng.encodeUrl(g.url);
         } catch (e) {
           stageEl.innerHTML = `
             <div class="is-empty">

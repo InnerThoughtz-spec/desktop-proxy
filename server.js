@@ -202,7 +202,15 @@ function joinUrl(base, suffix) {
 
 function normalizeGNMath(data) {
   if (!Array.isArray(data)) return [];
-  const COVER_URL = 'https://gn-math.com';
+  // Two distinct hosts:
+  //   - {COVER_URL}: all 770+ cover PNGs live in the `gn-math/covers` repo.
+  //     gn-math.com only serves a fraction of them (most return its 404
+  //     page), so hotlink the raw github URL instead — it's stable and
+  //     served with the correct image content-type.
+  //   - {HTML_URL}:  the playable game wrappers live at gn-math.com/<file>.
+  //     We can't use raw.githubusercontent for these because it serves
+  //     html as text/plain, which iframes won't render.
+  const COVER_URL = 'https://raw.githubusercontent.com/gn-math/covers/main';
   const HTML_URL  = 'https://gn-math.com';
   return data
     .filter((g) => g && typeof g.id === 'number' && g.id >= 0 && g.url && g.name)
