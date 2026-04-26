@@ -1937,6 +1937,15 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         }
       });
 
+      // Cmd/Ctrl+K to focus search (parity with InnerArcade).
+      root.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          searchEl.focus();
+          searchEl.select();
+        }
+      });
+
       // Kick off
       showHome();
     },
@@ -2009,6 +2018,29 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       let currentView = 'grid'; // 'grid' | 'player'
       let manifestPromise = null;
 
+      // Persistent prefs (localStorage). Stored as plain arrays of game IDs.
+      const FAV_KEY = 'inner.arcade.favs';
+      const REC_KEY = 'inner.arcade.recent';
+      const REC_MAX = 12;
+      function readList(key) {
+        try { const v = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(v) ? v : []; }
+        catch { return []; }
+      }
+      function writeList(key, list) {
+        try { localStorage.setItem(key, JSON.stringify(list)); } catch {}
+      }
+      let favs = new Set(readList(FAV_KEY));
+      let recent = readList(REC_KEY); // most-recent first
+
+      function toggleFav(id) {
+        if (favs.has(id)) favs.delete(id); else favs.add(id);
+        writeList(FAV_KEY, [...favs]);
+      }
+      function pushRecent(id) {
+        recent = [id, ...recent.filter((x) => x !== id)].slice(0, REC_MAX);
+        writeList(REC_KEY, recent);
+      }
+
       function loadManifest() {
         if (manifestPromise) return manifestPromise;
         manifestPromise = fetch('/api/arcade/games')
@@ -2065,18 +2097,31 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           return;
         }
 
-        // Group by source for visual sectioning when no filter is active.
-        const groups = q || src
+        // Build "Favorites" + "Recently Played" lists from the same filter set
+        // so they hide automatically when the user is searching for something
+        // specific that doesn't include them.
+        const filteredById = new Map(filtered.map((g) => [g.id, g]));
+        const favList = [...favs].map((id) => filteredById.get(id)).filter(Boolean);
+        const recentList = recent.map((id) => filteredById.get(id)).filter(Boolean);
+
+        // When no search/filter is active we show everything grouped by source.
+        // When the user IS filtering, collapse to a single "Search" list.
+        const sourceGroups = q || src
           ? [{ source: src || 'Search', list: filtered }]
           : groupBySource(filtered);
+
+        const sections = [];
+        if (favList.length) sections.push({ source: '★ Favorites', list: favList, klass: 'ia-row-fav' });
+        if (recentList.length) sections.push({ source: 'Recently Played', list: recentList });
+        sections.push(...sourceGroups);
 
         stageEl.innerHTML = `
           <div class="ia-stats">
             ${total.toLocaleString()} games · GN-Math · Truffled · Selenite
             ${q ? ` · matching "<b>${escapeHtml(q)}</b>"` : ''}
           </div>
-          ${groups.map((g) => `
-            <section class="ia-row">
+          ${sections.map((g) => `
+            <section class="ia-row ${g.klass || ''}">
               <div class="ia-row-head">
                 <h2>${escapeHtml(g.source)}</h2>
                 <span class="ia-row-count">${g.list.length}</span>
@@ -2102,22 +2147,44 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       function gameCardHTML(g) {
         const initial = (g.name || '?').charAt(0).toUpperCase();
         const thumb = g.thumb ? escapeHtml(g.thumb) : '';
+        const fav = favs.has(g.id);
         return `
-          <button class="ia-card" data-play="${escapeHtml(g.id)}" title="${escapeHtml(g.name)}">
+          <div class="ia-card" data-play="${escapeHtml(g.id)}" title="${escapeHtml(g.name)}" tabindex="0">
+            <button class="ia-fav ${fav ? 'is-on' : ''}" data-fav="${escapeHtml(g.id)}"
+                    title="${fav ? 'Unfavorite' : 'Add to favorites'}" aria-label="Toggle favorite">
+              ${fav ? '★' : '☆'}
+            </button>
             ${thumb
               ? `<img class="ia-card-thumb" src="${thumb}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ia-card-thumb ia-card-blank',textContent:'${escapeHtml(initial)}'}))">`
               : `<div class="ia-card-thumb ia-card-blank">${escapeHtml(initial)}</div>`}
             <div class="ia-card-name">${escapeHtml(g.name)}</div>
             <div class="ia-card-source">${escapeHtml(g.source || 'Other')}</div>
-          </button>`;
+          </div>`;
       }
 
       function bindCards() {
-        stageEl.querySelectorAll('[data-play]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            const id = btn.dataset.play;
-            const g = allGames.find((x) => x.id === id);
+        // Star toggle — bubbles first so the inner click doesn't launch the
+        // game. Re-renders the grid in place to update the star + Favorites
+        // section without losing scroll position.
+        stageEl.querySelectorAll('[data-fav]').forEach((btn) => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            toggleFav(btn.dataset.fav);
+            const scrollY = stageEl.scrollTop;
+            renderGrid();
+            stageEl.scrollTop = scrollY;
+          });
+        });
+        // Card click → play. Use [data-play] not <button> so the inner star
+        // button doesn't conflict with HTML's nested-button rule.
+        stageEl.querySelectorAll('[data-play]').forEach((card) => {
+          const launch = () => {
+            const g = allGames.find((x) => x.id === card.dataset.play);
             if (g) playGame(g);
+          };
+          card.addEventListener('click', launch);
+          card.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); launch(); }
           });
         });
       }
@@ -2126,6 +2193,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       async function playGame(g) {
         currentView = 'player';
         backBtn.hidden = false;
+        pushRecent(g.id);
         stageEl.innerHTML = `<div class="is-loading">Starting "${escapeHtml(g.name)}"…</div>`;
         let proxiedUrl;
         try {

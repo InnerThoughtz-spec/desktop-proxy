@@ -1392,6 +1392,7 @@ input, textarea { font: inherit; color: inherit; }
   gap: 12px;
 }
 .ia-card {
+  position: relative;
   background: rgba(255,255,255,.04);
   border: 1px solid rgba(255,255,255,.06);
   border-radius: 12px;
@@ -1401,11 +1402,50 @@ input, textarea { font: inherit; color: inherit; }
   display: flex; flex-direction: column;
   transition: transform .12s var(--ease), border-color .15s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease);
 }
-.ia-card:hover {
+.ia-card:hover,
+.ia-card:focus-visible {
   transform: translateY(-2px);
   border-color: rgba(255,209,102,.55);
   background: rgba(255,255,255,.07);
   box-shadow: 0 8px 22px rgba(255,209,102,.18);
+  outline: none;
+}
+
+/* Star button — overlays the thumbnail. Clicking it toggles favorite without
+   launching the game (handler stops propagation). */
+.ia-fav {
+  position: absolute;
+  top: 12px; right: 12px;
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: rgba(0,0,0,.55);
+  color: rgba(255,255,255,.6);
+  border-radius: 50%;
+  font-size: 16px; line-height: 1;
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity .12s var(--ease), background .12s var(--ease), color .12s var(--ease), transform .12s var(--ease);
+}
+.ia-card:hover .ia-fav,
+.ia-card:focus-within .ia-fav,
+.ia-fav.is-on {
+  opacity: 1;
+}
+.ia-fav:hover {
+  background: rgba(0,0,0,.75);
+  color: #ffd166;
+  transform: scale(1.08);
+}
+.ia-fav.is-on {
+  color: #ffd166;
+  text-shadow: 0 0 8px rgba(255,209,102,.6);
+}
+
+/* Favorites row gets a soft amber halo so it stands out at the top. */
+.ia-row-fav .ia-row-head h2 {
+  color: #ffd166;
+  text-shadow: 0 0 14px rgba(255,209,102,.5);
 }
 .ia-card-thumb {
   display: block;
