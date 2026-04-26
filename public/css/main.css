@@ -1319,3 +1319,147 @@ input, textarea { font: inherit; color: inherit; }
   .is-row { padding: 6px 14px 14px; }
   .is-detail-body { padding: 40px 16px 24px; }
 }
+
+/* ===========================================================================
+   InnerArcade — reuses .is-* base styles for the splash/topbar/buttons,
+   then layers an arcade-flavored amber+magenta accent and a poster grid. */
+
+.ia-app .is-wordmark b { color: #ffd166; }
+.ia-app .is-letter {
+  /* Amber→magenta neon for the arcade splash. */
+  text-shadow:
+    0 0 4px #fff,
+    0 0 10px #ffd166,
+    0 0 22px #ffd166,
+    0 0 38px rgba(255,209,102,.65),
+    0 0 60px rgba(255,91,231,.55),
+    0 0 90px rgba(255,91,231,.35);
+}
+.ia-splash .is-splash-glow {
+  background:
+    radial-gradient(40% 40% at 50% 50%, rgba(255,209,102,.18), transparent 60%),
+    radial-gradient(60% 60% at 50% 50%, rgba(255,91,231,.10), transparent 70%);
+}
+.ia-splash .is-splash-tag {
+  text-shadow: 0 0 10px rgba(255,209,102,.5);
+}
+
+.ia-source {
+  padding: 8px 10px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 8px;
+  color: #fff;
+  font: inherit; font-size: 13px;
+  outline: none;
+  cursor: pointer;
+  max-width: 140px;
+}
+.ia-source:focus {
+  border-color: rgba(255,209,102,.55);
+  background: rgba(255,255,255,.10);
+}
+.ia-source option { background: #11151c; color: #fff; }
+
+.ia-stats {
+  font-size: 12px;
+  color: rgba(255,255,255,.55);
+  padding: 12px 24px 0;
+  letter-spacing: .02em;
+}
+.ia-stats b { color: #ffd166; font-weight: 600; }
+
+.ia-row { padding: 10px 24px 18px; }
+.ia-row-head {
+  display: flex; align-items: baseline; gap: 12px;
+  margin: 6px 0 12px;
+}
+.ia-row-head h2 {
+  font-size: 16px; font-weight: 700;
+  color: rgba(255,255,255,.92);
+  margin: 0;
+}
+.ia-row-count {
+  font-size: 11px;
+  color: rgba(255,255,255,.5);
+  background: rgba(255,255,255,.06);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+.ia-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+}
+.ia-card {
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 12px;
+  padding: 8px;
+  cursor: pointer;
+  text-align: left;
+  display: flex; flex-direction: column;
+  transition: transform .12s var(--ease), border-color .15s var(--ease), box-shadow .15s var(--ease), background .15s var(--ease);
+}
+.ia-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255,209,102,.55);
+  background: rgba(255,255,255,.07);
+  box-shadow: 0 8px 22px rgba(255,209,102,.18);
+}
+.ia-card-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  border-radius: 8px;
+  background: #181c25;
+  object-fit: cover;
+  border: 1px solid rgba(255,255,255,.06);
+}
+.ia-card-blank {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 38px; font-weight: 800; color: rgba(255,255,255,.4);
+}
+.ia-card-name {
+  font-size: 12.5px; line-height: 1.3;
+  color: #fff;
+  margin-top: 8px;
+  font-weight: 600;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.ia-card-source {
+  font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  color: rgba(255,209,102,.7);
+  margin-top: 2px;
+}
+
+/* Player */
+.ia-player {
+  position: absolute; inset: 56px 0 0 0;
+  background: #000;
+  display: flex; flex-direction: column;
+}
+.ia-player-bar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 14px;
+  background: rgba(7,9,13,.8);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  font-size: 13px;
+}
+.ia-player-title { font-weight: 700; color: #fff; }
+.ia-player-source {
+  font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  color: rgba(255,209,102,.7);
+}
+.ia-player-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #000;
+}
+
+@media (max-width: 760px) {
+  .ia-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .ia-row { padding: 8px 14px 14px; }
+}

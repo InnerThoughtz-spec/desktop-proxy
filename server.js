@@ -165,6 +165,143 @@ app.get('/api/cinema/search', (req, res) => {
   sendTmdb(res, () => tmdb(`/search/multi?language=en-US&include_adult=false&query=${encodeURIComponent(q)}`));
 });
 
+// ---------- InnerArcade games manifest ----------
+// Aggregates the public catalogs from gn-math, truffled, and selenite into
+// one normalized list: { id, name, source, thumb, url }. The InnerArcade app
+// fetches this once, then iframes each game's URL through the active proxy
+// engine (UV/Scramjet) so X-Frame-Options doesn't block the iframe.
+//
+// We cache the merged result for 30 minutes — these manifests rarely change
+// faster than that and we don't want to hammer github + selenite on every
+// page load.
+const ARCADE_TTL = 30 * 60 * 1000;
+let arcadeCache = { ts: 0, data: null };
+
+const ARCADE_SOURCES = {
+  GN_MATH:  'https://raw.githubusercontent.com/gn-math/assets/main/zones.json',
+  TRUFFLED: 'https://raw.githubusercontent.com/aukak/truffled/main/public/js/json/g.json',
+  SELENITE: 'https://selenite.cc/resources/games.json',
+};
+
+async function fetchJSONOrNull(url) {
+  try {
+    const r = await fetch(url, {
+      headers: { 'accept': 'application/json', 'user-agent': 'desktop-proxy/0.1' },
+    });
+    if (!r.ok) return null;
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+function safeStr(s) { return typeof s === 'string' ? s : ''; }
+function joinUrl(base, suffix) {
+  if (!suffix) return '';
+  if (/^https?:\/\//i.test(suffix)) return suffix;
+  return base.replace(/\/$/, '') + '/' + suffix.replace(/^\//, '');
+}
+
+function normalizeGNMath(data) {
+  if (!Array.isArray(data)) return [];
+  const COVER_URL = 'https://gn-math.com';
+  const HTML_URL  = 'https://gn-math.com';
+  return data
+    .filter((g) => g && typeof g.id === 'number' && g.id >= 0 && g.url && g.name)
+    // Drop sentinel/placeholder entries (e.g. "[!] COMMENTS") — they look
+    // like real games in the source manifest but aren't.
+    .filter((g) => !/^\[/.test(g.name))
+    .map((g) => ({
+      id: 'gn-' + g.id,
+      name: safeStr(g.name),
+      source: 'GN-Math',
+      thumb: safeStr(g.cover).replace('{COVER_URL}', COVER_URL).replace('{HTML_URL}', HTML_URL),
+      url: safeStr(g.url).replace('{HTML_URL}', HTML_URL).replace('{COVER_URL}', COVER_URL),
+      author: safeStr(g.author) || undefined,
+    }));
+}
+
+function normalizeTruffled(data) {
+  const list = Array.isArray(data?.games) ? data.games : (Array.isArray(data) ? data : []);
+  const BASE = 'https://truffled.lol';
+  return list
+    .filter((g) => g && g.name && g.url)
+    .map((g, i) => ({
+      id: 'tr-' + (g.url || '').replace(/[^a-z0-9]+/gi, '-').slice(0, 60) + '-' + i,
+      name: safeStr(g.name),
+      source: 'Truffled',
+      thumb: g.thumbnail ? joinUrl(BASE, g.thumbnail) : '',
+      url: joinUrl(BASE, g.url),
+    }));
+}
+
+function normalizeSelenite(data) {
+  if (!Array.isArray(data)) return [];
+  const BASE = 'https://selenite.cc';
+  return data
+    .filter((g) => g && g.directory && g.name)
+    .map((g) => {
+      const dir = safeStr(g.directory);
+      const img = safeStr(g.image);
+      const params = new URLSearchParams({
+        title: g.name,
+        dir,
+        img: img,
+        type: 'g',
+      });
+      return {
+        id: 'sel-' + dir,
+        name: safeStr(g.name),
+        source: 'Selenite',
+        thumb: img ? `${BASE}/resources/games/${dir}/${img}` : '',
+        url: `${BASE}/loader.html?${params.toString()}`,
+      };
+    });
+}
+
+async function buildArcadeManifest() {
+  const [gn, tr, sel] = await Promise.all([
+    fetchJSONOrNull(ARCADE_SOURCES.GN_MATH),
+    fetchJSONOrNull(ARCADE_SOURCES.TRUFFLED),
+    fetchJSONOrNull(ARCADE_SOURCES.SELENITE),
+  ]);
+  const games = [
+    ...normalizeGNMath(gn),
+    ...normalizeTruffled(tr),
+    ...normalizeSelenite(sel),
+  ];
+  // Sort each source alphabetically; mix happens client-side via grouping.
+  games.sort((a, b) => {
+    if (a.source !== b.source) return a.source.localeCompare(b.source);
+    return a.name.localeCompare(b.name);
+  });
+  return {
+    games,
+    sources: {
+      'GN-Math':  { count: games.filter((x) => x.source === 'GN-Math').length,  available: !!gn },
+      'Truffled': { count: games.filter((x) => x.source === 'Truffled').length, available: !!tr },
+      'Selenite': { count: games.filter((x) => x.source === 'Selenite').length, available: !!sel },
+    },
+    ts: Date.now(),
+  };
+}
+
+app.get('/api/arcade/games', async (_req, res) => {
+  const now = Date.now();
+  if (arcadeCache.data && (now - arcadeCache.ts) < ARCADE_TTL) {
+    res.setHeader('Cache-Control', 'public, max-age=600');
+    return res.json(arcadeCache.data);
+  }
+  try {
+    const data = await buildArcadeManifest();
+    arcadeCache = { ts: now, data };
+    res.setHeader('Cache-Control', 'public, max-age=600');
+    res.json(data);
+  } catch (e) {
+    // If we have a stale cached version, serve it rather than 502.
+    if (arcadeCache.data) return res.json(arcadeCache.data);
+    res.status(502).json({ error: 'arcade_unavailable', detail: e.message });
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));

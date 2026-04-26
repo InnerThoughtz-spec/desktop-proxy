@@ -16,6 +16,9 @@
       // InnerStream: rounded screen frame with a tiny "i" (dot+stem) on the
       // left and a filled play triangle on the right. Reads as "i ▶".
       stream: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="8.6" r=".7" fill="currentColor" stroke="none"/><path d="M8 11v5.5"/><path d="M13 9.2l5.4 2.8L13 14.8z" fill="currentColor"/></svg>`,
+      // InnerArcade: rounded controller body with a d-pad cross on the left
+      // and 4 face buttons on the right. Reads as a gamepad silhouette.
+      arcade: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><path d="M5 8h14a3 3 0 013 3v3a4 4 0 01-7.2 2.4l-.6-.8h-4.4l-.6.8A4 4 0 012 14v-3a3 3 0 013-3z"/><path d="M7.5 12h3M9 10.5v3"/><circle cx="15.5" cy="11" r=".7" fill="currentColor" stroke="none"/><circle cx="17.5" cy="13" r=".7" fill="currentColor" stroke="none"/><circle cx="13.5" cy="13" r=".7" fill="currentColor" stroke="none"/><circle cx="15.5" cy="15" r=".7" fill="currentColor" stroke="none"/></svg>`,
     };
   })();
 
@@ -43,12 +46,35 @@
         <path d="M30 22 L48 32 L30 42 Z" fill="url(#g)" filter="url(#b)" opacity=".9"/>
         <path d="M30 22 L48 32 L30 42 Z" fill="url(#g)"/>
       </svg>`);
+  const INNER_ARCADE_DATA_URI =
+    "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+        <defs>
+          <linearGradient id="ag" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stop-color="#ffd166"/>
+            <stop offset="1" stop-color="#ff5be7"/>
+          </linearGradient>
+          <filter id="ab" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.2"/>
+          </filter>
+        </defs>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="#0b0d12"/>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="none" stroke="url(#ag)" stroke-width="2" filter="url(#ab)" opacity=".85"/>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="none" stroke="url(#ag)" stroke-width="1.4"/>
+        <path d="M14 22h36a8 8 0 018 8v6a10 10 0 01-18 6l-2-2H26l-2 2a10 10 0 01-18-6v-6a8 8 0 018-8z" fill="none" stroke="url(#ag)" stroke-width="2.4" filter="url(#ab)" opacity=".9"/>
+        <path d="M14 22h36a8 8 0 018 8v6a10 10 0 01-18 6l-2-2H26l-2 2a10 10 0 01-18-6v-6a8 8 0 018-8z" fill="none" stroke="url(#ag)" stroke-width="1.6"/>
+        <path d="M18 32h8M22 28v8" stroke="url(#ag)" stroke-width="2.2" stroke-linecap="round"/>
+        <circle cx="44" cy="30" r="1.6" fill="url(#ag)"/>
+        <circle cx="50" cy="34" r="1.6" fill="url(#ag)"/>
+        <circle cx="38" cy="34" r="1.6" fill="url(#ag)"/>
+        <circle cx="44" cy="38" r="1.6" fill="url(#ag)"/>
+      </svg>`);
   const BRAND_PRESETS = [
     { slug: 'inner-stream', name: 'InnerStream', appId: 'inner-stream', iconURL: INNER_STREAM_DATA_URI },
+    { slug: 'inner-arcade', name: 'InnerArcade', appId: 'inner-arcade', iconURL: INNER_ARCADE_DATA_URI },
     { slug: 'spotify',     name: 'Spotify',     url: 'https://open.spotify.com/',         color: '1DB954' },
     { slug: 'youtube',     name: 'YouTube',     url: 'https://www.youtube.com/',          color: 'FF0000' },
     { slug: 'discord',     name: 'Discord',     url: 'https://discord.com/app',           color: '5865F2' },
-    { slug: 'playstation', name: 'PlayStation', url: 'https://www.playstation.com/',      color: 'FFFFFF' },
     { slug: 'nvidia',      name: 'GeForce NOW', url: 'https://play.geforcenow.com/',      color: '76B900' },
     { slug: 'github',      name: 'GitHub',      url: 'https://github.com/',               color: 'FFFFFF' },
     { slug: 'google',      name: 'Google',      url: 'https://www.google.com/',           color: '4285F4' },
@@ -1584,6 +1610,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
                 <input data-role="search" placeholder="Search movies, shows…" spellcheck="false" autocomplete="off">
               </div>
               <button class="is-iconbtn" data-act="reload" title="Reload">↻</button>
+              <button class="is-iconbtn" data-act="fullscreen" title="Fullscreen (F11)">⛶</button>
             </div>
             <div class="is-stage" data-role="stage"></div>
           </div>
@@ -1595,6 +1622,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       const searchEl   = root.querySelector('[data-role="search"]');
       const backBtn    = root.querySelector('[data-act="back"]');
       const reloadBtn  = root.querySelector('[data-act="reload"]');
+      const fullscreenBtn = root.querySelector('[data-act="fullscreen"]');
 
       // Splash letters — render each glyph as its own span so we can drive
       // the per-letter neon flicker animation.
@@ -1895,8 +1923,285 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         showHome();
       });
 
+      // Fullscreen toggle: prefers the parent .win element so the OS chrome
+      // disappears too. Falls back to document if the API rejects it.
+      fullscreenBtn?.addEventListener('click', () => {
+        const winEl = root.closest('.win') || document.documentElement;
+        if (!document.fullscreenElement) {
+          (winEl.requestFullscreen?.call(winEl) ||
+           winEl.webkitRequestFullscreen?.call(winEl) ||
+           Promise.reject(new Error('no fullscreen api')))
+            ?.catch?.(() => document.documentElement.requestFullscreen?.());
+        } else {
+          document.exitFullscreen?.();
+        }
+      });
+
       // Kick off
       showHome();
+    },
+  });
+
+  // ---------- InnerArcade (custom in-OS games hub) ----------
+  // Aggregates the public game catalogs from gn-math, truffled, and selenite
+  // (fetched + normalized by /api/arcade/games on the server side) and runs
+  // each game through the active web proxy so X-Frame-Options / mixed-origin
+  // restrictions don't block the iframe.
+  // Same neon-splash effect as InnerStream, different name + accent.
+  OS.registerApp('inner-arcade', {
+    title: 'InnerArcade',
+    glyphSVG: SVG.arcade,
+    singleInstance: true,
+    defaultW: 1180, defaultH: 760,
+    mount(root) {
+      root.innerHTML = `
+        <div class="is-app ia-app">
+          <div class="is-splash ia-splash" data-role="splash">
+            <div class="is-splash-glow"></div>
+            <div class="is-splash-name" data-role="splash-letters"></div>
+            <div class="is-splash-tag">your private arcade</div>
+          </div>
+          <div class="is-main" data-role="main" hidden>
+            <div class="is-topbar">
+              <button class="is-iconbtn" data-act="back" hidden title="Back">‹</button>
+              <div class="is-wordmark">Inner<b>Arcade</b></div>
+              <div class="is-search">
+                <input data-role="search" placeholder="Search games (${'⌘/Ctrl+K'})…" spellcheck="false" autocomplete="off">
+              </div>
+              <select class="ia-source" data-role="source" title="Filter by source">
+                <option value="">All sources</option>
+                <option value="GN-Math">GN-Math</option>
+                <option value="Truffled">Truffled</option>
+                <option value="Selenite">Selenite</option>
+              </select>
+              <button class="is-iconbtn" data-act="reload" title="Reload">↻</button>
+              <button class="is-iconbtn" data-act="fullscreen" title="Fullscreen">⛶</button>
+            </div>
+            <div class="is-stage" data-role="stage"></div>
+          </div>
+        </div>`;
+
+      const splashEl       = root.querySelector('[data-role="splash"]');
+      const mainEl         = root.querySelector('[data-role="main"]');
+      const stageEl        = root.querySelector('[data-role="stage"]');
+      const searchEl       = root.querySelector('[data-role="search"]');
+      const sourceEl       = root.querySelector('[data-role="source"]');
+      const backBtn        = root.querySelector('[data-act="back"]');
+      const reloadBtn      = root.querySelector('[data-act="reload"]');
+      const fullscreenBtn  = root.querySelector('[data-act="fullscreen"]');
+
+      // Splash letters (same effect as InnerStream — different name).
+      const NAME = 'InnerArcade';
+      const lettersEl = root.querySelector('[data-role="splash-letters"]');
+      lettersEl.innerHTML = '';
+      [...NAME].forEach((ch, i) => {
+        const s = document.createElement('span');
+        s.className = 'is-letter';
+        s.style.animationDelay = (i * 0.07) + 's';
+        s.textContent = ch === ' ' ? ' ' : ch;
+        lettersEl.appendChild(s);
+      });
+      setTimeout(() => { splashEl.classList.add('is-out'); mainEl.hidden = false; }, 2400);
+      setTimeout(() => { splashEl.style.display = 'none'; }, 3200);
+
+      // ---------- State ----------
+      let allGames = [];
+      let currentView = 'grid'; // 'grid' | 'player'
+      let manifestPromise = null;
+
+      function loadManifest() {
+        if (manifestPromise) return manifestPromise;
+        manifestPromise = fetch('/api/arcade/games')
+          .then((r) => r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)))
+          .then((j) => {
+            allGames = Array.isArray(j.games) ? j.games : [];
+            return allGames;
+          });
+        return manifestPromise;
+      }
+
+      // ---------- Views ----------
+      async function showGrid() {
+        currentView = 'grid';
+        backBtn.hidden = true;
+        stageEl.innerHTML = `<div class="is-loading">Loading library…</div>`;
+        try {
+          await loadManifest();
+        } catch (e) {
+          stageEl.innerHTML = `
+            <div class="is-empty">
+              <div class="is-empty-title">Couldn't load games library</div>
+              <div class="is-empty-sub">${escapeHtml(String(e.message || e))}</div>
+              <button class="is-btn is-btn-primary" data-act="retry">Try again</button>
+            </div>`;
+          stageEl.querySelector('[data-act="retry"]')?.addEventListener('click', () => {
+            manifestPromise = null;
+            showGrid();
+          });
+          return;
+        }
+        renderGrid();
+      }
+
+      function renderGrid() {
+        if (currentView !== 'grid') return;
+        const q = searchEl.value.trim().toLowerCase();
+        const src = sourceEl.value;
+        const filtered = allGames.filter((g) => {
+          if (src && g.source !== src) return false;
+          if (q && !(g.name || '').toLowerCase().includes(q)) return false;
+          return true;
+        });
+        const total = allGames.length;
+
+        if (!total) {
+          stageEl.innerHTML = `<div class="is-empty"><div class="is-empty-title">No games available.</div></div>`;
+          return;
+        }
+        if (!filtered.length) {
+          stageEl.innerHTML = `
+            <div class="ia-stats">${total.toLocaleString()} games loaded · 0 match the filter</div>
+            <div class="is-empty"><div class="is-empty-title">No matches.</div></div>`;
+          return;
+        }
+
+        // Group by source for visual sectioning when no filter is active.
+        const groups = q || src
+          ? [{ source: src || 'Search', list: filtered }]
+          : groupBySource(filtered);
+
+        stageEl.innerHTML = `
+          <div class="ia-stats">
+            ${total.toLocaleString()} games · GN-Math · Truffled · Selenite
+            ${q ? ` · matching "<b>${escapeHtml(q)}</b>"` : ''}
+          </div>
+          ${groups.map((g) => `
+            <section class="ia-row">
+              <div class="ia-row-head">
+                <h2>${escapeHtml(g.source)}</h2>
+                <span class="ia-row-count">${g.list.length}</span>
+              </div>
+              <div class="ia-grid">
+                ${g.list.slice(0, 200).map(gameCardHTML).join('')}
+              </div>
+            </section>`).join('')}
+        `;
+        bindCards();
+      }
+
+      function groupBySource(games) {
+        const order = ['GN-Math', 'Truffled', 'Selenite', 'Other'];
+        const map = {};
+        for (const g of games) {
+          const k = g.source || 'Other';
+          (map[k] = map[k] || []).push(g);
+        }
+        return order.filter((k) => map[k]).map((k) => ({ source: k, list: map[k] }));
+      }
+
+      function gameCardHTML(g) {
+        const initial = (g.name || '?').charAt(0).toUpperCase();
+        const thumb = g.thumb ? escapeHtml(g.thumb) : '';
+        return `
+          <button class="ia-card" data-play="${escapeHtml(g.id)}" title="${escapeHtml(g.name)}">
+            ${thumb
+              ? `<img class="ia-card-thumb" src="${thumb}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ia-card-thumb ia-card-blank',textContent:'${escapeHtml(initial)}'}))">`
+              : `<div class="ia-card-thumb ia-card-blank">${escapeHtml(initial)}</div>`}
+            <div class="ia-card-name">${escapeHtml(g.name)}</div>
+            <div class="ia-card-source">${escapeHtml(g.source || 'Other')}</div>
+          </button>`;
+      }
+
+      function bindCards() {
+        stageEl.querySelectorAll('[data-play]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const id = btn.dataset.play;
+            const g = allGames.find((x) => x.id === id);
+            if (g) playGame(g);
+          });
+        });
+      }
+
+      // ---------- Play ----------
+      async function playGame(g) {
+        currentView = 'player';
+        backBtn.hidden = false;
+        stageEl.innerHTML = `<div class="is-loading">Starting "${escapeHtml(g.name)}"…</div>`;
+        let proxiedUrl;
+        try {
+          await waitForUV(15000);
+          const eng = OS.proxy.engineFor(OS.proxy.getEngine());
+          if (!eng || typeof eng.encodeUrl !== 'function') {
+            throw new Error('proxy engine not available');
+          }
+          proxiedUrl = eng.encodeUrl(g.url);
+        } catch (e) {
+          stageEl.innerHTML = `
+            <div class="is-empty">
+              <div class="is-empty-title">Couldn't start game</div>
+              <div class="is-empty-sub">${escapeHtml(String(e.message || e))}</div>
+              <button class="is-btn is-btn-primary" data-act="back-to-grid">Back to library</button>
+            </div>`;
+          stageEl.querySelector('[data-act="back-to-grid"]')?.addEventListener('click', showGrid);
+          return;
+        }
+        stageEl.innerHTML = `
+          <div class="ia-player">
+            <div class="ia-player-bar">
+              <div class="ia-player-title">${escapeHtml(g.name)}</div>
+              <div class="ia-player-source">${escapeHtml(g.source || '')}</div>
+              <div style="flex:1"></div>
+              <a class="is-btn is-btn-ghost" href="${escapeHtml(g.url)}" target="_blank" rel="noopener">Open original</a>
+            </div>
+            <iframe class="ia-player-frame"
+                    src="${proxiedUrl}"
+                    allow="autoplay; fullscreen; gamepad; pointer-lock; clipboard-read; clipboard-write"
+                    allowfullscreen
+                    referrerpolicy="no-referrer"></iframe>
+          </div>`;
+      }
+
+      // ---------- Wiring ----------
+      let typingTimer = null;
+      searchEl.addEventListener('input', () => {
+        clearTimeout(typingTimer);
+        typingTimer = setTimeout(() => { if (currentView === 'grid') renderGrid(); }, 180);
+      });
+      sourceEl.addEventListener('change', () => { if (currentView === 'grid') renderGrid(); });
+
+      backBtn.addEventListener('click', () => {
+        searchEl.value = '';
+        sourceEl.value = '';
+        showGrid();
+      });
+      reloadBtn.addEventListener('click', () => {
+        manifestPromise = null;
+        showGrid();
+      });
+
+      fullscreenBtn?.addEventListener('click', () => {
+        const winEl = root.closest('.win') || document.documentElement;
+        if (!document.fullscreenElement) {
+          (winEl.requestFullscreen?.call(winEl) ||
+           winEl.webkitRequestFullscreen?.call(winEl) ||
+           Promise.reject(new Error('no fullscreen api')))
+            ?.catch?.(() => document.documentElement.requestFullscreen?.());
+        } else {
+          document.exitFullscreen?.();
+        }
+      });
+
+      // Cmd/Ctrl+K to focus search.
+      root.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          searchEl.focus();
+          searchEl.select();
+        }
+      });
+
+      // Kick off
+      showGrid();
     },
   });
 

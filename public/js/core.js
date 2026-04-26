@@ -10,11 +10,13 @@
     accent2: '#b28aff',
     // wallpaper: { kind: 'preset'|'image'|'gif'|'video'|'url'|'server', value: <key|wpId|url|serverId>, meta? }
     wallpaper: { kind: 'preset', value: 'rainDusk' },
-    pinned: ['browser', 'settings', 'files', 'about'],
+    pinned: ['browser', 'inner-stream', 'inner-arcade', 'files', 'settings', 'about'],
     // Desktop icons: [{ id, appId, x, y }]
     desktopIcons: [
-      { id: 'di_browser', appId: 'browser', x: 24, y: 88 },
-      { id: 'di_files',   appId: 'files',   x: 24, y: 200 },
+      { id: 'di_browser', appId: 'browser',     x: 24, y: 88 },
+      { id: 'di_stream',  appId: 'inner-stream', x: 24, y: 200 },
+      { id: 'di_arcade',  appId: 'inner-arcade', x: 24, y: 312 },
+      { id: 'di_files',   appId: 'files',        x: 24, y: 424 },
     ],
     locked: true,
     fpsVisible: true,
@@ -131,6 +133,13 @@
       const merged = { ...structuredClone(DEFAULT_STATE), ...parsed };
       // Re-lock on each fresh load (don't persist unlocked across reloads)
       merged.locked = true;
+      // ---- Migrations ----
+      // Ensure the default pinned set includes apps added after a user's
+      // first visit. Only adds; never removes a user-removed pin.
+      if (!Array.isArray(merged.pinned)) merged.pinned = [];
+      for (const id of ['inner-stream', 'inner-arcade']) {
+        if (!merged.pinned.includes(id)) merged.pinned.push(id);
+      }
       return merged;
     } catch {
       return structuredClone(DEFAULT_STATE);
@@ -888,7 +897,10 @@
 
     // Dock buttons
     document.getElementById('start-btn').addEventListener('click', toggleStart);
-    document.getElementById('grid-btn').addEventListener('click', toggleStart);
+    // 'grid-btn' was retired (the secondary "All apps" button next to Start —
+    // its function fully overlapped with the Start button). Guard the lookup
+    // so older HTML clones (or future re-additions) still work.
+    document.getElementById('grid-btn')?.addEventListener('click', toggleStart);
     document.getElementById('dock-theme').addEventListener('click', () => {
       setState({ theme: state.theme === 'dark' ? 'light' : 'dark' });
     });
