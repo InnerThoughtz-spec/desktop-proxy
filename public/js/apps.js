@@ -13,12 +13,38 @@
       gear: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`,
       folder: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>`,
       info: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="8" r=".5" fill="currentColor"/></svg>`,
+      // InnerStream: rounded screen frame with a tiny "i" (dot+stem) on the
+      // left and a filled play triangle on the right. Reads as "i ▶".
+      stream: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="8.6" r=".7" fill="currentColor" stroke="none"/><path d="M8 11v5.5"/><path d="M13 9.2l5.4 2.8L13 14.8z" fill="currentColor"/></svg>`,
     };
   })();
 
   // ---------- Preset brand shortcuts (resolved via simpleicons CDN) ----------
+  // The first entry is *not* a real brand — it's our self-hosted streaming app.
+  // Setting `appId` instead of `url` tells the click handler to pin/open the
+  // built-in app rather than create a URL-based browser shortcut.
+  const INNER_STREAM_DATA_URI =
+    "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+        <defs>
+          <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stop-color="#7df9ff"/>
+            <stop offset="1" stop-color="#ff5be7"/>
+          </linearGradient>
+          <filter id="b" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.2"/>
+          </filter>
+        </defs>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="#0b0d12"/>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="none" stroke="url(#g)" stroke-width="2" filter="url(#b)" opacity=".85"/>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="none" stroke="url(#g)" stroke-width="1.4"/>
+        <circle cx="20" cy="22" r="2.4" fill="url(#g)"/>
+        <rect x="18.5" y="28" width="3" height="18" rx="1.5" fill="url(#g)"/>
+        <path d="M30 22 L48 32 L30 42 Z" fill="url(#g)" filter="url(#b)" opacity=".9"/>
+        <path d="M30 22 L48 32 L30 42 Z" fill="url(#g)"/>
+      </svg>`);
   const BRAND_PRESETS = [
-    { slug: 'netflix',     name: 'Netflix',     url: 'https://www.netflix.com/',          color: 'E50914' },
+    { slug: 'inner-stream', name: 'InnerStream', appId: 'inner-stream', iconURL: INNER_STREAM_DATA_URI },
     { slug: 'spotify',     name: 'Spotify',     url: 'https://open.spotify.com/',         color: '1DB954' },
     { slug: 'youtube',     name: 'YouTube',     url: 'https://www.youtube.com/',          color: 'FF0000' },
     { slug: 'discord',     name: 'Discord',     url: 'https://discord.com/app',           color: '5865F2' },
@@ -977,11 +1003,21 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       const btn = document.createElement('button');
       btn.className = 'brand-chip';
       btn.title = b.name;
+      // Built-in app entries supply `iconURL` directly (data: URI). Real brand
+      // entries fall back to the public simpleicons CDN.
+      const iconSrc = b.iconURL || brandIconURL(b.slug, b.color);
       btn.innerHTML = `
-        <span class="brand-chip-ico"><img src="${brandIconURL(b.slug, b.color)}" alt="" referrerpolicy="no-referrer"></span>
+        <span class="brand-chip-ico"><img src="${iconSrc}" alt="" referrerpolicy="no-referrer"></span>
         <span class="brand-chip-name">${escapeHtml(b.name)}</span>`;
       btn.addEventListener('click', () => {
-        OS.addShortcut({ name: b.name, url: b.url, iconURL: brandIconURL(b.slug, b.color) });
+        if (b.appId) {
+          // Built-in: pin to the dock and open it. We don't create a URL
+          // shortcut because the app is already part of the registry.
+          if (!(OS.state.pinned || []).includes(b.appId)) OS.togglePinned(b.appId);
+          OS.openApp(b.appId);
+        } else {
+          OS.addShortcut({ name: b.name, url: b.url, iconURL: iconSrc });
+        }
         renderSCList();
       });
       brandsRoot.appendChild(btn);
@@ -1519,6 +1555,350 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
     while (v >= 1024 && i < u.length - 1) { v /= 1024; i++; }
     return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
   }
+
+  // ---------- InnerStream (custom in-OS streaming app) ----------
+  // Metadata and posters come from TMDB (proxied through /api/cinema/* so we
+  // don't ship the API key client-side). Actual *playback* uses vidking.net
+  // embed URLs:
+  //   https://www.vidking.net/embed/movie/{tmdb_id}
+  //   https://www.vidking.net/embed/tv/{tmdb_id}/{season}/{episode}
+  // The first paint is a black, neon-glow splash that says the app's name.
+  OS.registerApp('inner-stream', {
+    title: 'InnerStream',
+    glyphSVG: SVG.stream,
+    singleInstance: true,
+    defaultW: 1180, defaultH: 760,
+    mount(root) {
+      root.innerHTML = `
+        <div class="is-app">
+          <div class="is-splash" data-role="splash">
+            <div class="is-splash-glow"></div>
+            <div class="is-splash-name" data-role="splash-letters"></div>
+            <div class="is-splash-tag">your private cinema</div>
+          </div>
+          <div class="is-main" data-role="main" hidden>
+            <div class="is-topbar">
+              <button class="is-iconbtn" data-act="back" hidden title="Back">‹</button>
+              <div class="is-wordmark">Inner<b>Stream</b></div>
+              <div class="is-search">
+                <input data-role="search" placeholder="Search movies, shows…" spellcheck="false" autocomplete="off">
+              </div>
+              <button class="is-iconbtn" data-act="reload" title="Reload">↻</button>
+            </div>
+            <div class="is-stage" data-role="stage"></div>
+          </div>
+        </div>`;
+
+      const splashEl   = root.querySelector('[data-role="splash"]');
+      const mainEl     = root.querySelector('[data-role="main"]');
+      const stageEl    = root.querySelector('[data-role="stage"]');
+      const searchEl   = root.querySelector('[data-role="search"]');
+      const backBtn    = root.querySelector('[data-act="back"]');
+      const reloadBtn  = root.querySelector('[data-act="reload"]');
+
+      // Splash letters — render each glyph as its own span so we can drive
+      // the per-letter neon flicker animation.
+      const NAME = 'InnerStream';
+      const lettersEl = root.querySelector('[data-role="splash-letters"]');
+      lettersEl.innerHTML = '';
+      [...NAME].forEach((ch, i) => {
+        const s = document.createElement('span');
+        s.className = 'is-letter';
+        s.style.animationDelay = (i * 0.07) + 's';
+        s.textContent = ch === ' ' ? '\u00A0' : ch;
+        lettersEl.appendChild(s);
+      });
+
+      // Splash plays once per window-instance. After ~2.4s it fades out and
+      // the main UI takes over.
+      setTimeout(() => {
+        splashEl.classList.add('is-out');
+        mainEl.hidden = false;
+      }, 2400);
+      setTimeout(() => { splashEl.style.display = 'none'; }, 3200);
+
+      // ---------- TMDB helpers ----------
+      const cache = Object.create(null);
+      function imgURL(path, size = 'w500') {
+        if (!path) return '';
+        return `https://image.tmdb.org/t/p/${size}${path}`;
+      }
+      async function fetchJSON(endpoint) {
+        if (cache[endpoint]) return cache[endpoint];
+        const r = await fetch(endpoint);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        cache[endpoint] = j;
+        return j;
+      }
+
+      // ---------- Views ----------
+      let currentView = null;
+
+      async function showHome() {
+        currentView = 'home';
+        backBtn.hidden = true;
+        stageEl.innerHTML = `<div class="is-loading">Loading…</div>`;
+        try {
+          const [trending, popMovies, popTV, topMovies] = await Promise.all([
+            fetchJSON('/api/cinema/trending'),
+            fetchJSON('/api/cinema/popular/movie'),
+            fetchJSON('/api/cinema/popular/tv'),
+            fetchJSON('/api/cinema/top/movie'),
+          ]);
+          const tList = (trending.results || []).filter((x) => x.media_type === 'movie' || x.media_type === 'tv');
+          const featured = tList.find((x) => x.backdrop_path && x.overview) || tList[0] || (popMovies.results || [])[0];
+          stageEl.innerHTML = `
+            ${heroHTML(featured)}
+            ${rowHTML('Trending This Week', tList)}
+            ${rowHTML('Popular Movies', popMovies.results || [], 'movie')}
+            ${rowHTML('Popular TV', popTV.results || [], 'tv')}
+            ${rowHTML('Top Rated Movies', topMovies.results || [], 'movie')}
+          `;
+          bindStage();
+        } catch (e) {
+          stageEl.innerHTML = `
+            <div class="is-empty">
+              <div class="is-empty-title">Couldn't load InnerStream</div>
+              <div class="is-empty-sub">${escapeHtml(String(e.message || e))}</div>
+              <button class="is-btn is-btn-primary" data-act="retry">Try again</button>
+            </div>`;
+          stageEl.querySelector('[data-act="retry"]')?.addEventListener('click', showHome);
+        }
+      }
+
+      function heroHTML(item) {
+        if (!item) return '';
+        const type = item.media_type || (item.first_air_date ? 'tv' : 'movie');
+        const title = item.title || item.name || '';
+        const year = (item.release_date || item.first_air_date || '').slice(0, 4);
+        const back = imgURL(item.backdrop_path, 'w1280');
+        return `
+          <div class="is-hero" ${back ? `style="background-image:url('${back}')"` : ''}>
+            <div class="is-hero-fade"></div>
+            <div class="is-hero-body">
+              <div class="is-hero-tag">Featured · ${type === 'tv' ? 'Series' : 'Movie'}${year ? ' · ' + year : ''}</div>
+              <h1 class="is-hero-title">${escapeHtml(title)}</h1>
+              <div class="is-hero-overview">${escapeHtml((item.overview || '').slice(0, 300))}</div>
+              <div class="is-hero-actions">
+                <button class="is-btn is-btn-primary" data-open-details="${type}:${item.id}">▶ Play</button>
+                <button class="is-btn is-btn-ghost" data-open-details="${type}:${item.id}">More info</button>
+              </div>
+            </div>
+          </div>`;
+      }
+
+      function cardHTML(it, forceType) {
+        const t = forceType || it.media_type || (it.first_air_date ? 'tv' : 'movie');
+        const tt = it.title || it.name || '';
+        const poster = imgURL(it.poster_path, 'w342');
+        const initial = (tt.charAt(0) || '?').toUpperCase();
+        return `
+          <button class="is-card" data-open-details="${t}:${it.id}" title="${escapeHtml(tt)}">
+            ${poster
+              ? `<img class="is-card-poster" src="${poster}" alt="" referrerpolicy="no-referrer" loading="lazy">`
+              : `<div class="is-card-poster is-card-blank">${escapeHtml(initial)}</div>`}
+            <div class="is-card-name">${escapeHtml(tt)}</div>
+          </button>`;
+      }
+
+      function rowHTML(label, items, forceType) {
+        const list = (items || []).filter((x) => x && (x.id != null));
+        if (!list.length) return '';
+        return `
+          <section class="is-row">
+            <div class="is-row-head"><h2>${escapeHtml(label)}</h2></div>
+            <div class="is-row-track">${list.slice(0, 18).map((it) => cardHTML(it, forceType)).join('')}</div>
+          </section>`;
+      }
+
+      function bindStage() {
+        stageEl.querySelectorAll('[data-open-details]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const [type, id] = btn.dataset.openDetails.split(':');
+            showDetails(type, id);
+          });
+        });
+      }
+
+      async function showDetails(type, id) {
+        currentView = 'details';
+        backBtn.hidden = false;
+        stageEl.innerHTML = `<div class="is-loading">Loading…</div>`;
+        let detail;
+        try {
+          detail = await fetchJSON(`/api/cinema/details/${type}/${id}`);
+        } catch (e) {
+          stageEl.innerHTML = `<div class="is-empty"><div class="is-empty-title">Couldn't load.</div></div>`;
+          return;
+        }
+        const title = detail.title || detail.name || '';
+        const year = (detail.release_date || detail.first_air_date || '').slice(0, 4);
+        const runtime = detail.runtime
+          ? `${detail.runtime} min`
+          : (Array.isArray(detail.episode_run_time) && detail.episode_run_time[0] ? `${detail.episode_run_time[0]} min` : '');
+        const rating = detail.vote_average ? Number(detail.vote_average).toFixed(1) : '';
+        const genres = (detail.genres || []).map((g) => g.name).join(' · ');
+        const seasons = type === 'tv' ? (detail.seasons || []).filter((s) => s.season_number > 0) : [];
+        const back = imgURL(detail.backdrop_path, 'w1280');
+
+        stageEl.innerHTML = `
+          <div class="is-detail">
+            <div class="is-detail-back" ${back ? `style="background-image:url('${back}')"` : ''}></div>
+            <div class="is-detail-fade"></div>
+            <div class="is-detail-body">
+              <div class="is-detail-grid">
+                <div class="is-detail-poster">
+                  ${detail.poster_path ? `<img src="${imgURL(detail.poster_path, 'w500')}" alt="">` : ''}
+                </div>
+                <div class="is-detail-meta">
+                  <h1 class="is-detail-title">${escapeHtml(title)}</h1>
+                  <div class="is-detail-sub">
+                    ${year ? `<span>${year}</span>` : ''}
+                    ${runtime ? `<span>${runtime}</span>` : ''}
+                    ${rating ? `<span class="is-rating">★ ${rating}</span>` : ''}
+                    ${type === 'tv' ? `<span>${seasons.length} Season${seasons.length === 1 ? '' : 's'}</span>` : ''}
+                  </div>
+                  ${genres ? `<div class="is-detail-genres">${escapeHtml(genres)}</div>` : ''}
+                  <p class="is-detail-overview">${escapeHtml(detail.overview || '')}</p>
+                  ${type === 'tv'
+                    ? renderTVPicker(seasons)
+                    : `<div class="is-detail-actions">
+                         <button class="is-btn is-btn-primary" data-play-movie="${detail.id}">▶ Play movie</button>
+                       </div>`}
+                </div>
+              </div>
+              ${detail.recommendations?.results?.length
+                ? rowHTML('More like this', detail.recommendations.results.slice(0, 14))
+                : ''}
+            </div>
+          </div>`;
+
+        bindStage(); // for the "more like this" row
+
+        stageEl.querySelector('[data-play-movie]')?.addEventListener('click', (e) => {
+          playMovie(e.currentTarget.dataset.playMovie);
+        });
+
+        if (type === 'tv') wireTVPicker(detail.id, seasons);
+      }
+
+      function renderTVPicker(seasons) {
+        if (!seasons.length) {
+          return `<div class="is-detail-actions" style="opacity:.7;">No episodes available.</div>`;
+        }
+        return `
+          <div class="is-tv-picker">
+            <div class="is-tv-row">
+              <label>Season</label>
+              <select data-role="season">
+                ${seasons.map((s) => `<option value="${s.season_number}">${escapeHtml(s.name || ('Season ' + s.season_number))}</option>`).join('')}
+              </select>
+            </div>
+            <div class="is-tv-row">
+              <label>Episode</label>
+              <select data-role="episode"><option>—</option></select>
+            </div>
+            <div class="is-detail-actions">
+              <button class="is-btn is-btn-primary" data-role="tv-play">▶ Play episode</button>
+            </div>
+          </div>`;
+      }
+
+      async function wireTVPicker(tvId, seasons) {
+        if (!seasons.length) return;
+        const seasonSel = stageEl.querySelector('[data-role="season"]');
+        const epSel     = stageEl.querySelector('[data-role="episode"]');
+        const playBtn   = stageEl.querySelector('[data-role="tv-play"]');
+        if (!seasonSel || !epSel || !playBtn) return;
+
+        async function reloadEpisodes() {
+          epSel.innerHTML = '<option>Loading…</option>';
+          try {
+            const data = await fetchJSON(`/api/cinema/season/${tvId}/${seasonSel.value}`);
+            const eps = data.episodes || [];
+            if (!eps.length) { epSel.innerHTML = '<option>No episodes</option>'; return; }
+            epSel.innerHTML = eps.map((e) => `<option value="${e.episode_number}">E${e.episode_number} · ${escapeHtml(e.name || '')}</option>`).join('');
+          } catch {
+            epSel.innerHTML = '<option>Failed</option>';
+          }
+        }
+
+        seasonSel.addEventListener('change', reloadEpisodes);
+        reloadEpisodes();
+        playBtn.addEventListener('click', () => {
+          const s = seasonSel.value, e = epSel.value;
+          if (!s || !e || isNaN(parseInt(e, 10))) return;
+          playEpisode(tvId, s, e);
+        });
+      }
+
+      function playMovie(id) {
+        currentView = 'player';
+        backBtn.hidden = false;
+        const url = `https://www.vidking.net/embed/movie/${encodeURIComponent(id)}`;
+        stageEl.innerHTML = `
+          <div class="is-player">
+            <iframe src="${url}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                    allowfullscreen referrerpolicy="no-referrer" loading="eager"></iframe>
+          </div>`;
+      }
+      function playEpisode(tvId, season, ep) {
+        currentView = 'player';
+        backBtn.hidden = false;
+        const url = `https://www.vidking.net/embed/tv/${encodeURIComponent(tvId)}/${encodeURIComponent(season)}/${encodeURIComponent(ep)}`;
+        stageEl.innerHTML = `
+          <div class="is-player">
+            <iframe src="${url}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                    allowfullscreen referrerpolicy="no-referrer" loading="eager"></iframe>
+          </div>`;
+      }
+
+      // ---------- Search ----------
+      let searchTimer = null;
+      searchEl.addEventListener('input', () => {
+        clearTimeout(searchTimer);
+        const q = searchEl.value.trim();
+        if (!q) { showHome(); return; }
+        searchTimer = setTimeout(() => doSearch(q), 280);
+      });
+
+      async function doSearch(q) {
+        currentView = 'search';
+        backBtn.hidden = false;
+        stageEl.innerHTML = `<div class="is-loading">Searching for "${escapeHtml(q)}"…</div>`;
+        try {
+          const r = await fetch('/api/cinema/search?q=' + encodeURIComponent(q));
+          const data = await r.json();
+          const results = (data.results || []).filter((x) => x.media_type === 'movie' || x.media_type === 'tv');
+          if (!results.length) {
+            stageEl.innerHTML = `<div class="is-empty"><div class="is-empty-title">No results for "${escapeHtml(q)}".</div></div>`;
+            return;
+          }
+          stageEl.innerHTML = `
+            <div class="is-search-head"><h2>Results for "${escapeHtml(q)}"</h2></div>
+            <div class="is-search-grid">
+              ${results.map((it) => cardHTML(it)).join('')}
+            </div>`;
+          bindStage();
+        } catch (e) {
+          stageEl.innerHTML = `<div class="is-empty"><div class="is-empty-title">Search failed.</div></div>`;
+        }
+      }
+
+      backBtn.addEventListener('click', () => {
+        searchEl.value = '';
+        showHome();
+      });
+      reloadBtn.addEventListener('click', () => {
+        for (const k of Object.keys(cache)) delete cache[k];
+        showHome();
+      });
+
+      // Kick off
+      showHome();
+    },
+  });
 
   // ---------- About ----------
   OS.registerApp('about', {

@@ -88,6 +88,83 @@ app.get('/api/engines', (_req, res) => {
   });
 });
 
+// ---------- InnerStream cinema proxy (TMDB) ----------
+// We proxy TMDB's v3 read-only API server-side so:
+//   1) The TMDB API key never ships to the client (set TMDB_API_KEY in env to
+//      override the public default), and
+//   2) CORS / referrer quirks don't block the in-OS movie app.
+// The actual *playback* uses vidking.net embeds, which the iframe loads
+// directly — we only surface metadata + posters here.
+const TMDB_API_KEY = process.env.TMDB_API_KEY || '8265bd1679663a7ea12ac168da84d2e8';
+const TMDB_BASE = 'https://api.themoviedb.org/3';
+const tmdbCache = new Map(); // key -> { ts, body }
+const TMDB_TTL = 5 * 60 * 1000;
+
+async function tmdb(pathAndQuery) {
+  const cacheKey = pathAndQuery;
+  const now = Date.now();
+  const hit = tmdbCache.get(cacheKey);
+  if (hit && (now - hit.ts) < TMDB_TTL) return hit.body;
+  const sep = pathAndQuery.includes('?') ? '&' : '?';
+  const url = `${TMDB_BASE}${pathAndQuery}${sep}api_key=${TMDB_API_KEY}`;
+  const r = await fetch(url, { headers: { 'accept': 'application/json' } });
+  if (!r.ok) {
+    const err = new Error(`tmdb ${r.status}`);
+    err.status = r.status;
+    throw err;
+  }
+  const body = await r.json();
+  tmdbCache.set(cacheKey, { ts: now, body });
+  // soft cap on cache size
+  if (tmdbCache.size > 500) {
+    const oldest = [...tmdbCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+    if (oldest) tmdbCache.delete(oldest[0]);
+  }
+  return body;
+}
+
+function sendTmdb(res, fn) {
+  fn().then(
+    (body) => { res.setHeader('Cache-Control', 'public, max-age=300'); res.json(body); },
+    (err) => res.status(err.status || 502).json({ error: 'tmdb_unavailable', detail: err.message })
+  );
+}
+
+app.get('/api/cinema/trending', (_req, res) =>
+  sendTmdb(res, () => tmdb('/trending/all/week?language=en-US')));
+
+app.get('/api/cinema/popular/movie', (_req, res) =>
+  sendTmdb(res, () => tmdb('/movie/popular?language=en-US&page=1')));
+
+app.get('/api/cinema/popular/tv', (_req, res) =>
+  sendTmdb(res, () => tmdb('/tv/popular?language=en-US&page=1')));
+
+app.get('/api/cinema/top/movie', (_req, res) =>
+  sendTmdb(res, () => tmdb('/movie/top_rated?language=en-US&page=1')));
+
+app.get('/api/cinema/top/tv', (_req, res) =>
+  sendTmdb(res, () => tmdb('/tv/top_rated?language=en-US&page=1')));
+
+app.get('/api/cinema/details/:type/:id', (req, res) => {
+  const type = req.params.type === 'tv' ? 'tv' : 'movie';
+  const id = String(req.params.id || '').replace(/[^0-9]/g, '');
+  if (!id) return res.status(400).json({ error: 'bad_id' });
+  sendTmdb(res, () => tmdb(`/${type}/${id}?language=en-US&append_to_response=credits,videos,recommendations`));
+});
+
+app.get('/api/cinema/season/:id/:season', (req, res) => {
+  const id = String(req.params.id || '').replace(/[^0-9]/g, '');
+  const season = String(req.params.season || '').replace(/[^0-9]/g, '');
+  if (!id || !season) return res.status(400).json({ error: 'bad_id' });
+  sendTmdb(res, () => tmdb(`/tv/${id}/season/${season}?language=en-US`));
+});
+
+app.get('/api/cinema/search', (req, res) => {
+  const q = String(req.query.q || '').trim();
+  if (!q) return res.json({ results: [] });
+  sendTmdb(res, () => tmdb(`/search/multi?language=en-US&include_adult=false&query=${encodeURIComponent(q)}`));
+});
+
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
