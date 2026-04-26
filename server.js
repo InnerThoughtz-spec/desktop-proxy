@@ -1,0 +1,178 @@
+const http = require('http');
+const path = require('path');
+const fs = require('fs');
+const crypto = require('crypto');
+const express = require('express');
+const { createBareServer } = require('@tomphttp/bare-server-node');
+
+const PORT = process.env.PORT || 8080;
+const BARE_PREFIX = '/bare/';
+
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, 'data');
+const WP_DIR = path.join(DATA_DIR, 'wallpapers');
+const WP_MANIFEST = path.join(DATA_DIR, 'wallpapers.json');
+fs.mkdirSync(WP_DIR, { recursive: true });
+
+const MAX_UPLOAD = parseInt(process.env.MAX_UPLOAD_BYTES || String(50 * 1024 * 1024), 10); // 50 MB
+const ALLOWED_MIME = /^(image\/(png|jpe?g|gif|webp|avif)|video\/(mp4|webm|quicktime))$/i;
+const EXT_BY_MIME = {
+  'image/png': 'png', 'image/jpeg': 'jpg', 'image/jpg': 'jpg', 'image/gif': 'gif',
+  'image/webp': 'webp', 'image/avif': 'avif',
+  'video/mp4': 'mp4', 'video/webm': 'webm', 'video/quicktime': 'mov',
+};
+
+function loadManifest() {
+  try { return JSON.parse(fs.readFileSync(WP_MANIFEST, 'utf8')); } catch { return { items: [] }; }
+}
+function saveManifest(m) { fs.writeFileSync(WP_MANIFEST, JSON.stringify(m, null, 2)); }
+
+const uvDist = path.dirname(require.resolve('@titaniumnetwork-dev/ultraviolet/package.json'));
+const uvPath = path.join(uvDist, 'dist');
+const bareMuxDist = path.join(__dirname, 'node_modules', '@mercuryworkshop', 'bare-mux', 'dist');
+const bareModuleDist = path.join(__dirname, 'node_modules', '@mercuryworkshop', 'bare-as-module3', 'dist');
+
+const bare = createBareServer(BARE_PREFIX, {
+  logErrors: true,
+  // Default is 10 — wildly low for a browser loading a real site with dozens of
+  // subresources. Bump it so single-user dev doesn't immediately get 429'd.
+  connectionLimiter: {
+    maxConnectionsPerIP: parseInt(process.env.BARE_MAX_CONN_PER_IP || '2000', 10),
+    windowDuration: 60,
+    blockDuration: 10,
+  },
+});
+
+const app = express();
+
+app.get('/uv/uv.config.js', (_req, res) => {
+  res.type('application/javascript').sendFile(path.join(__dirname, 'public', 'uv.config.js'));
+});
+
+function jsStatic(dir) {
+  return express.static(dir, {
+    index: false,
+    setHeaders(res, file) {
+      if (file.endsWith('.js') || file.endsWith('.mjs') || file.endsWith('.cjs')) {
+        res.setHeader('Content-Type', 'application/javascript');
+      }
+    },
+  });
+}
+
+app.use('/uv/', jsStatic(uvPath));
+app.use('/baremux/', jsStatic(bareMuxDist));
+app.use('/baremodule/', jsStatic(bareModuleDist));
+
+app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
+
+app.get('/healthz', (_req, res) => res.json({ ok: true }));
+
+// ---------- Shared wallpaper library ----------
+app.get('/api/wallpapers', (_req, res) => {
+  const m = loadManifest();
+  res.json({ items: m.items });
+});
+
+app.get('/api/wallpapers/:id/file', (req, res) => {
+  const m = loadManifest();
+  const it = m.items.find((x) => x.id === req.params.id);
+  if (!it) return res.status(404).send('not found');
+  const file = path.join(WP_DIR, it.file);
+  if (!file.startsWith(WP_DIR)) return res.status(400).send('bad path');
+  res.setHeader('Content-Type', it.mime);
+  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  fs.createReadStream(file)
+    .on('error', () => res.status(500).end())
+    .pipe(res);
+});
+
+// Upload: raw body with headers x-filename (opt), x-upload-by (opt), content-type = mime
+app.post('/api/wallpapers', (req, res) => {
+  const mime = (req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
+  if (!ALLOWED_MIME.test(mime)) return res.status(415).json({ error: 'unsupported media type' });
+  const ext = EXT_BY_MIME[mime] || 'bin';
+  const name = String(req.headers['x-filename'] || '').slice(0, 120) || null;
+  const uploader = String(req.headers['x-upload-by'] || '').slice(0, 60) || null;
+  const id = 'sw_' + crypto.randomBytes(7).toString('hex');
+  const fname = `${id}.${ext}`;
+  const fpath = path.join(WP_DIR, fname);
+
+  let size = 0;
+  let aborted = false;
+  const out = fs.createWriteStream(fpath);
+  req.on('data', (chunk) => {
+    size += chunk.length;
+    if (size > MAX_UPLOAD) {
+      aborted = true;
+      req.destroy();
+      out.destroy();
+      try { fs.unlinkSync(fpath); } catch {}
+      if (!res.headersSent) res.status(413).json({ error: 'too large' });
+    }
+  });
+  req.on('error', () => {
+    try { fs.unlinkSync(fpath); } catch {}
+    if (!res.headersSent) res.status(500).end();
+  });
+  req.pipe(out);
+  out.on('finish', () => {
+    if (aborted) return;
+    const kind = mime.startsWith('video/') ? 'video' : (mime === 'image/gif' ? 'gif' : 'image');
+    const item = { id, file: fname, mime, kind, size, name, uploader, created: Date.now() };
+    const m = loadManifest();
+    m.items.unshift(item);
+    saveManifest(m);
+    res.json({ ok: true, item });
+  });
+  out.on('error', () => {
+    if (!res.headersSent) res.status(500).json({ error: 'write failed' });
+  });
+});
+
+app.delete('/api/wallpapers/:id', (req, res) => {
+  const m = loadManifest();
+  const idx = m.items.findIndex((x) => x.id === req.params.id);
+  if (idx < 0) return res.status(404).send('not found');
+  const [it] = m.items.splice(idx, 1);
+  try { fs.unlinkSync(path.join(WP_DIR, it.file)); } catch {}
+  saveManifest(m);
+  res.json({ ok: true });
+});
+
+app.use((_req, res) => {
+  res.status(404).sendFile(path.join(__dirname, 'public', '404.html'), (err) => {
+    if (err) res.type('txt').send('Not found');
+  });
+});
+
+const server = http.createServer();
+
+server.on('request', (req, res) => {
+  if (bare.shouldRoute(req)) {
+    bare.routeRequest(req, res);
+  } else {
+    app(req, res);
+  }
+});
+
+server.on('upgrade', (req, socket, head) => {
+  if (bare.shouldRoute(req)) {
+    bare.routeUpgrade(req, socket, head);
+  } else {
+    socket.end();
+  }
+});
+
+server.on('listening', () => {
+  console.log(`desktop-proxy listening on :${PORT}`);
+});
+
+server.listen(PORT);
+
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    bare.close();
+    server.close();
+    process.exit(0);
+  });
+}

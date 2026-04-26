@@ -1,0 +1,35 @@
+# deps
+node_modules/
+npm-debug.log
+yarn-error.log
+pnpm-debug.log
+.pnpm-store/
+
+# env
+.env
+.env.*
+!.env.example
+
+# runtime data — don't commit user uploads
+data/wallpapers/
+data/wallpapers.json
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*~
+
+# claude code session state
+.claude/
+
+# misc
+*.log
+*.tsbuildinfo
+coverage/
+.nyc_output/
+.tmp/
+tmp/

@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark light">
+<title>Desktop</title>
+<link rel="stylesheet" href="/css/main.css">
+<script src="/baremux/index.js"></script>
+<script src="/uv/uv.bundle.js" defer></script>
+<script src="/uv/uv.config.js" defer></script>
+<script>
+  // Register SW + set bare-mux transport to our local bare-server-node.
+  (async () => {
+    try {
+      if ('serviceWorker' in navigator) {
+        await navigator.serviceWorker.register('/sw.js', { scope: '/' });
+      }
+    } catch (e) { console.error('SW register failed', e); }
+
+    try {
+      const { BareMuxConnection } = window.BareMux || {};
+      if (!BareMuxConnection) { console.error('bare-mux missing'); return; }
+      const conn = new BareMuxConnection('/baremux/worker.js');
+      const current = await conn.getTransport().catch(() => null);
+      if (current !== '/baremodule/index.mjs') {
+        await conn.setTransport('/baremodule/index.mjs', [location.origin + '/bare/']);
+      }
+      window.__proxyReady = true;
+    } catch (e) { console.error('bare-mux transport setup failed', e); }
+  })();
+</script>
+</head>
+<body>
+<div id="boot" class="boot">
+  <div class="win-logo" aria-hidden="true">
+    <i></i><i></i>
+    <i></i><i></i>
+  </div>
+  <div class="boot-label">starting</div>
+</div>
+
+<!-- Shared wallpaper layers (live behind both lock and desktop) -->
+<div id="wallpaper" class="wallpaper"></div>
+<video id="wallpaper-video" class="wallpaper-video" autoplay loop muted playsinline></video>
+<div id="wallpaper-dim" class="wallpaper-dim"></div>
+
+<!-- FPS counter -->
+<div id="fps" class="fps" aria-hidden="true"><span class="fps-n">0</span> FPS</div>
+
+<!-- Lockscreen -->
+<section id="lock" class="lock" aria-label="Lockscreen">
+  <div class="lock-stack">
+    <h1 id="lock-day" class="lock-day">—</h1>
+    <div id="lock-date" class="lock-date">—</div>
+    <div id="lock-time" class="lock-time">—</div>
+  </div>
+  <div class="lock-hint">Click or press any key to unlock</div>
+</section>
+
+<!-- Desktop -->
+<main id="desktop" class="desktop" hidden>
+
+  <header class="os-header">
+    <h2 id="os-day" class="os-day">—</h2>
+  </header>
+
+  <section id="widget-rail" class="widget-rail" aria-label="Widgets">
+    <div class="widget-label">Jump Back In!</div>
+    <button class="widget-card" data-widget="resume">
+      <span class="widget-card-ico">◆</span>
+      <span class="widget-card-body">
+        <span class="widget-card-title">Open Browser</span>
+        <span class="widget-card-sub">Proxied web</span>
+      </span>
+    </button>
+
+    <div class="widget-label">Quick Play</div>
+    <button class="widget-card" data-widget="quick">
+      <span class="widget-card-ico ico-disc">♪</span>
+      <span class="widget-card-body">
+        <span class="widget-card-title">Ambient</span>
+        <span class="widget-card-sub">Not Playing</span>
+      </span>
+    </button>
+
+    <div class="widget-label">System Status</div>
+    <button class="widget-card row" data-widget="status">
+      <span class="widget-card-body">
+        <span class="widget-card-title">Update Log</span>
+        <span class="widget-card-sub">View latest patches</span>
+      </span>
+      <span class="widget-chev">›</span>
+    </button>
+  </section>
+
+  <aside id="side-rail" class="side-rail" aria-label="Quick tools">
+    <button class="srail-btn" data-side="notes" title="Notes">◨</button>
+    <button class="srail-btn" data-side="palette" title="Appearance">◐</button>
+  </aside>
+
+  <!-- Desktop icons (drop-in wallpaper shortcuts, drag to reposition, double-click to open) -->
+  <div id="desktop-icons" class="desktop-icons" aria-label="Desktop shortcuts"></div>
+
+  <!-- Context menu (shared) -->
+  <div id="ctx-menu" class="ctx-menu" role="menu" hidden></div>
+
+  <div id="windows" class="windows" aria-label="Open windows"></div>
+
+  <div id="start-menu" class="start-menu" hidden>
+    <div class="start-top">
+      <input id="start-search" type="search" placeholder="Search apps" autocomplete="off">
+    </div>
+    <div class="start-section-label">Pinned</div>
+    <div id="start-pinned" class="start-pinned"></div>
+    <div class="start-section-label">All apps</div>
+    <div id="start-all" class="start-all"></div>
+    <div class="start-foot">
+      <button class="chip" data-action="lock">Lock</button>
+      <button class="chip" data-action="about">About</button>
+    </div>
+  </div>
+
+  <!-- Centered pill dock -->
+  <footer id="dock" class="dock" role="toolbar" aria-label="Dock">
+    <button id="start-btn" class="dock-btn dock-start" aria-label="Start">
+      <span class="start-glyph"></span>
+    </button>
+    <button id="grid-btn" class="dock-btn" aria-label="All apps">
+      <span class="grid-glyph"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+    </button>
+    <div id="dock-pinned" class="dock-pinned"></div>
+    <div class="dock-sep"></div>
+    <button id="dock-clock" class="dock-btn dock-clock" title="Clock"></button>
+    <button id="dock-theme" class="dock-btn" title="Toggle theme">◐</button>
+    <button id="dock-settings" class="dock-btn" title="Settings">⚙</button>
+  </footer>
+</main>
+
+<template id="tpl-window">
+  <div class="win" tabindex="-1">
+    <div class="win-titlebar">
+      <div class="win-title">
+        <span class="win-icon"></span>
+        <span class="win-name"></span>
+      </div>
+      <div class="win-actions">
+        <button class="win-btn win-min" aria-label="Minimize">—</button>
+        <button class="win-btn win-max" aria-label="Maximize">▢</button>
+        <button class="win-btn win-close" aria-label="Close">✕</button>
+      </div>
+    </div>
+    <div class="win-body"></div>
+    <div class="win-resize win-resize-n"></div>
+    <div class="win-resize win-resize-s"></div>
+    <div class="win-resize win-resize-e"></div>
+    <div class="win-resize win-resize-w"></div>
+    <div class="win-resize win-resize-ne"></div>
+    <div class="win-resize win-resize-nw"></div>
+    <div class="win-resize win-resize-se"></div>
+    <div class="win-resize win-resize-sw"></div>
+  </div>
+</template>
+
+<script src="/js/storage.js" defer></script>
+<script src="/js/core.js" defer></script>
+<script src="/js/apps.js" defer></script>
+</body>
+</html>

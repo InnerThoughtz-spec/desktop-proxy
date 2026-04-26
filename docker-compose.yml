@@ -1,0 +1,33 @@
+# One-command local / single-host deploy.
+#
+#   docker compose up -d
+#   open http://localhost:8080
+#
+# Uploaded wallpapers live in the `data` named volume. If you want them on the
+# host, swap for a bind mount: `./data:/app/data`.
+
+services:
+  desktop-proxy:
+    build: .
+    image: desktop-proxy:latest
+    container_name: desktop-proxy
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      NODE_ENV: production
+      PORT: "8080"
+      DATA_DIR: /app/data
+      # Bump this if you want to accept bigger uploads. Default = 50 MB.
+      MAX_UPLOAD_BYTES: "${MAX_UPLOAD_BYTES:-52428800}"
+      BARE_MAX_CONN_PER_IP: "${BARE_MAX_CONN_PER_IP:-2000}"
+    volumes:
+      - wallpapers:/app/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+volumes:
+  wallpapers:

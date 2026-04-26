@@ -1,0 +1,21 @@
+{
+  "name": "desktop-proxy",
+  "version": "0.1.0",
+  "description": "Desktop-style web OS with an Ultraviolet-based web proxy.",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "@mercuryworkshop/bare-as-module3": "^2.2.5",
+    "@titaniumnetwork-dev/ultraviolet": "^3.2.10",
+    "@tomphttp/bare-server-node": "^2.0.4",
+    "express": "^4.19.2",
+    "ws": "^8.17.0"
+  }
+}
