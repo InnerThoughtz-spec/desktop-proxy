@@ -68,7 +68,10 @@
   }
 
   /**
-   * Fetches a track's audio URL from /api/music/track/:id and starts playing.
+   * Fetches metadata from /api/music/track/:id (title, artist, cover,
+   * duration) and points the <audio> element at /api/music/stream/:id so
+   * the bytes flow through our origin — googlevideo's signed URLs don't
+   * play directly in a third-party <audio> tag.
    * If a newer load() is fired before this resolves, the older one bails
    * (loadToken bookkeeping) so quick next-clicks don't overwrite each other.
    */
@@ -80,23 +83,21 @@
     a.load();
     emit(); // show loading state immediately
     try {
+      // Fetch metadata first so the now-playing UI can show title/artist/
+      // cover/duration before the audio buffers in.
       const r = await fetch(`/api/music/track/${encodeURIComponent(track.id)}`);
       if (myToken !== loadToken) return; // user clicked something else
       if (!r.ok) throw new Error(`track HTTP ${r.status}`);
       const data = await r.json();
       if (myToken !== loadToken) return;
-      const streams = (data.audioStreams || []).filter((s) => s.url);
-      if (!streams.length) throw new Error('no audio streams');
-      // Pick the highest-bitrate audio-only m4a — best browser compatibility.
-      const sorted = [...streams].sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-      const best = sorted[0];
-      // Augment the queue entry with full metadata (title may be incomplete
-      // when first added from a search result).
       track.title = data.title || track.title;
       track.artist = data.uploader || track.artist;
       track.cover = data.thumbnailUrl || track.cover;
       track.duration = data.duration || track.duration;
-      a.src = best.url;
+      // Point at the local stream proxy. The proxy forwards Range headers
+      // so seeking works, refreshes the upstream URL on 403/410, and
+      // adds the Origin/Referer that googlevideo requires.
+      a.src = `/api/music/stream/${encodeURIComponent(track.id)}`;
       try { await a.play(); } catch (e) {
         // Autoplay may be blocked until first user gesture; expose state
         // anyway so the UI can show "click to play".

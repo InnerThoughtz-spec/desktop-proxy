@@ -493,6 +493,120 @@ app.get('/api/music/track/:id', async (req, res) => {
   }
 });
 
+// Audio stream proxy. The googlevideo URLs that decipher() returns are
+// signed for YouTube's own client and don't play directly in a third-party
+// <audio> tag (CORS, range-handshake quirks, sometimes 403 without the
+// right Origin). We pipe the bytes through our own origin instead — same
+// approach Piped's `pipedproxy-*` host uses. Forwards the Range header so
+// HTML5 audio seeking still works.
+const Stream = require('node:stream');
+const { pipeline } = require('node:stream/promises');
+const streamUrlCache = new Map(); // id -> { url, mime, ts }
+const STREAM_URL_TTL = 4 * 60 * 1000; // googlevideo URLs typically stay valid ~5min
+
+async function resolveStream(id) {
+  const hit = streamUrlCache.get(id);
+  if (hit && (Date.now() - hit.ts) < STREAM_URL_TTL) return hit;
+  const yt = await getYT();
+  // ANDROID_VR is the only client whose signed URLs aren't rate-limited
+  // by googlevideo's SABR enforcement — WEB_REMIX, IOS, TV_SIMPLY, MWEB
+  // and YTMUSIC all 403 after the first or second 512KB chunk. ANDROID
+  // 403s after one. ANDROID_VR happily streams the whole file. (This
+  // is the same trick yt-dlp uses for music extraction.)
+  const info = await yt.getInfo(id, { client: 'ANDROID_VR' });
+  const fmts = (info.streaming_data?.adaptive_formats || [])
+    .filter((f) => f.has_audio && !f.has_video);
+  if (!fmts.length) throw new Error('no audio formats');
+  // Prefer m4a (mp4a.40.2) for browser compatibility, then highest bitrate.
+  const m4a = fmts.filter((f) => /audio\/mp4/.test(f.mime_type));
+  const pick = (m4a.length ? m4a : fmts).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+  // ANDROID_VR formats often expose .url directly (no decipher needed),
+  // but fall through to decipher when the URL is missing.
+  const url = pick.url || await pick.decipher(yt.session.player);
+  const out = {
+    url,
+    mime: pick.mime_type || 'audio/mp4',
+    contentLength: pick.content_length ? parseInt(pick.content_length, 10) : 0,
+    ts: Date.now(),
+  };
+  streamUrlCache.set(id, out);
+  return out;
+}
+
+app.get('/api/music/stream/:id', async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!safeYTId(id)) return res.status(400).end();
+
+    const { url, mime } = await resolveStream(id);
+    // googlevideo's audio CDN now caps single-request ranges to ~512KB
+    // and refuses both open-ended Ranges (`bytes=0-`) and oversized
+    // closed Ranges. Translate whatever the client sent into a 512KB
+    // closed window starting at the requested byte. The browser's
+    // <audio> element handles 206 partial responses natively — after
+    // buffering this chunk it'll request the next range automatically.
+    const CHUNK = 512 * 1024;
+    const reqRange = req.headers.range || 'bytes=0-';
+    const m = /^bytes=(\d+)-(\d*)$/.exec(reqRange);
+    let start = m ? parseInt(m[1], 10) : 0;
+    let endHint = m && m[2] ? parseInt(m[2], 10) : Infinity;
+    let effectiveEnd = Math.min(start + CHUNK - 1, endHint);
+    if (!isFinite(effectiveEnd)) effectiveEnd = start + CHUNK - 1;
+    const range = `bytes=${start}-${effectiveEnd}`;
+
+    const upstream = await fetch(url, {
+      headers: {
+        'range': range,
+        // googlevideo gates on these — without them you can get 403.
+        'origin': 'https://www.youtube.com',
+        'referer': 'https://www.youtube.com/',
+        'user-agent': 'Mozilla/5.0',
+      },
+    });
+
+    if (upstream.status === 403 || upstream.status === 410) {
+      // Signed URL expired — bust the cache and try once more.
+      streamUrlCache.delete(id);
+      const fresh = await resolveStream(id);
+      const retry = await fetch(fresh.url, {
+        headers: {
+          'range': range,
+          'origin': 'https://www.youtube.com',
+          'referer': 'https://www.youtube.com/',
+          'user-agent': 'Mozilla/5.0',
+        },
+      });
+      return pipeUpstream(retry, res, fresh.mime);
+    }
+    return pipeUpstream(upstream, res, mime);
+  } catch (e) {
+    console.error('[music/stream]', e.message);
+    if (!res.headersSent) res.status(502).end();
+  }
+});
+
+async function pipeUpstream(upstream, res, mime) {
+  res.status(upstream.status);
+  res.setHeader('Content-Type', mime);
+  for (const h of ['content-length', 'content-range', 'accept-ranges']) {
+    const v = upstream.headers.get(h);
+    if (v) res.setHeader(h, v);
+  }
+  // Don't let the browser cache aggressively — the source URL rotates.
+  res.setHeader('Cache-Control', 'private, max-age=0, must-revalidate');
+  if (!upstream.body) { res.end(); return; }
+  const node = Stream.Readable.fromWeb(upstream.body);
+  res.on('close', () => { try { node.destroy(); } catch {} });
+  try {
+    await pipeline(node, res);
+  } catch (e) {
+    // Client disconnect mid-stream is normal; only log unexpected errors.
+    if (e.code !== 'ERR_STREAM_PREMATURE_CLOSE' && e.code !== 'ECONNRESET') {
+      console.warn('[music/stream] pipeline:', e.code || e.message);
+    }
+  }
+}
+
 app.get('/api/music/playlist/:id', async (req, res) => {
   try {
     const id = String(req.params.id || '');
