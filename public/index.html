@@ -52,6 +52,15 @@
 <video id="wallpaper-video" class="wallpaper-video" autoplay loop muted playsinline></video>
 <div id="wallpaper-dim" class="wallpaper-dim"></div>
 
+<!-- Game/movie immersive fullscreen overlay. When active, the player iframe
+     is moved into .game-fs-content and this layer covers the whole viewport
+     above the dock, titlebar, and any other UI. Esc-twice (with a toast on
+     the first press) restores the iframe to its original spot. -->
+<div id="game-fullscreen" class="game-fs" hidden>
+  <div class="game-fs-content"></div>
+  <div class="game-fs-toast" hidden></div>
+</div>
+
 <!-- FPS counter -->
 <div id="fps" class="fps" aria-hidden="true"><span class="fps-n">0</span> FPS</div>
 

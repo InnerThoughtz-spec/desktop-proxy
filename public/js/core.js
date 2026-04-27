@@ -995,6 +995,79 @@
     return true;
   }
 
+  // ---- Immersive ("game") fullscreen ----
+  // For games + movies: moves a given iframe into a viewport-covering overlay
+  // that hides EVERYTHING — dock, titlebar, app chrome — and intercepts Esc.
+  // First Esc shows a toast for ~1.5s ("Press Esc again to exit"); second
+  // Esc inside that window restores the iframe to its original parent.
+  // Returns a cleanup function for programmatic exit. The overlay can hold
+  // only one iframe at a time; calling this while one is active swaps it.
+  function enterGameFullscreen(iframe, opts = {}) {
+    const root = document.getElementById('game-fullscreen');
+    if (!root || !iframe) return null;
+    const content = root.querySelector('.game-fs-content');
+    const toast = root.querySelector('.game-fs-toast');
+
+    // If we were already in fullscreen with another iframe, exit cleanly first.
+    if (root._exit) try { root._exit(); } catch {}
+
+    // Remember where the iframe came from so we can restore it on exit.
+    const placeholder = document.createComment('game-fs-placeholder');
+    iframe.parentNode.insertBefore(placeholder, iframe);
+    content.innerHTML = '';
+    content.appendChild(iframe);
+    root.hidden = false;
+
+    // Initial hint that fades out after a couple seconds.
+    showToast(`Press <kbd>Esc</kbd> twice to exit`, 2200);
+
+    let escArmed = false;
+    let escTimer = null;
+
+    function showToast(text, dur) {
+      toast.innerHTML = text;
+      toast.hidden = false;
+      // Restart the CSS animation by toggling the class.
+      toast.classList.remove('is-flash');
+      void toast.offsetWidth;
+      toast.classList.add('is-flash');
+      if (toast._t) clearTimeout(toast._t);
+      toast._t = setTimeout(() => { toast.hidden = true; }, dur);
+    }
+
+    function onKey(e) {
+      if (e.key !== 'Escape') return;
+      // Capture-phase + preventDefault so the iframe's own Esc handlers
+      // (some games use Esc as pause) don't compete with the exit gesture.
+      e.preventDefault();
+      e.stopPropagation();
+      if (escArmed) {
+        cleanup();
+      } else {
+        escArmed = true;
+        showToast(`Press <kbd>Esc</kbd> again to exit`, 1500);
+        if (escTimer) clearTimeout(escTimer);
+        escTimer = setTimeout(() => { escArmed = false; }, 1500);
+      }
+    }
+
+    function cleanup() {
+      if (escTimer) clearTimeout(escTimer);
+      if (toast._t) clearTimeout(toast._t);
+      document.removeEventListener('keydown', onKey, true);
+      toast.hidden = true;
+      try { placeholder.parentNode.replaceChild(iframe, placeholder); }
+      catch { /* iframe already detached */ }
+      root.hidden = true;
+      root._exit = null;
+      try { opts.onExit?.(); } catch {}
+    }
+
+    document.addEventListener('keydown', onKey, true);
+    root._exit = cleanup;
+    return cleanup;
+  }
+
   // ---- Expose ----
   window.DesktopOS = {
     state, setState, subscribe,
@@ -1008,6 +1081,7 @@
     addShortcut, updateShortcut, removeShortcut, reloadShortcuts,
     addDesktopIcon, removeDesktopIcon, moveDesktopIcon, hasDesktopIcon: _hasDesktopIcon,
     showContextMenu, hideContextMenu,
+    enterGameFullscreen,
     proxy: {
       engines: PROXY_ENGINES,
       engineFor: (id) => PROXY_ENGINES[id] || PROXY_ENGINES.uv,

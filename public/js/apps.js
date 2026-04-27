@@ -1862,25 +1862,49 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         });
       }
 
-      function playMovie(id) {
+      function renderPlayer(title, subtitle, url) {
         currentView = 'player';
         backBtn.hidden = false;
-        const url = `https://www.vidking.net/embed/movie/${encodeURIComponent(id)}`;
         stageEl.innerHTML = `
           <div class="is-player">
-            <iframe src="${url}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            <div class="is-player-bar">
+              <div class="is-player-title">${escapeHtml(title)}</div>
+              <div class="is-player-source">${escapeHtml(subtitle)}</div>
+              <div style="flex:1"></div>
+              <button class="is-iconbtn" data-act="player-fs" title="Fullscreen (Esc twice to exit)">⛶</button>
+              <button class="is-iconbtn" data-act="player-min" title="Minimize">—</button>
+              <button class="is-iconbtn" data-act="player-close" title="Close">✕</button>
+            </div>
+            <iframe class="is-player-frame"
+                    src="${url}"
+                    allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                     allowfullscreen referrerpolicy="no-referrer" loading="eager"></iframe>
           </div>`;
+        const winEl = root.closest('.win');
+        stageEl.querySelector('[data-act="player-min"]')?.addEventListener('click', () => {
+          winEl?.querySelector('.win-min')?.click();
+        });
+        stageEl.querySelector('[data-act="player-close"]')?.addEventListener('click', () => {
+          winEl?.querySelector('.win-close')?.click();
+        });
+        stageEl.querySelector('[data-act="player-fs"]')?.addEventListener('click', () => {
+          const iframe = stageEl.querySelector('.is-player-frame');
+          if (iframe && OS.enterGameFullscreen) OS.enterGameFullscreen(iframe);
+        });
+      }
+
+      function playMovie(id) {
+        const item = (cache[`/api/cinema/details/movie/${id}`]) || null;
+        const title = item?.title || 'Movie';
+        const year = (item?.release_date || '').slice(0, 4);
+        renderPlayer(title, year ? `Movie · ${year}` : 'Movie',
+          `https://www.vidking.net/embed/movie/${encodeURIComponent(id)}`);
       }
       function playEpisode(tvId, season, ep) {
-        currentView = 'player';
-        backBtn.hidden = false;
-        const url = `https://www.vidking.net/embed/tv/${encodeURIComponent(tvId)}/${encodeURIComponent(season)}/${encodeURIComponent(ep)}`;
-        stageEl.innerHTML = `
-          <div class="is-player">
-            <iframe src="${url}" allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-                    allowfullscreen referrerpolicy="no-referrer" loading="eager"></iframe>
-          </div>`;
+        const item = (cache[`/api/cinema/details/tv/${tvId}`]) || null;
+        const title = item?.name || 'TV';
+        renderPlayer(title, `S${season} · E${ep}`,
+          `https://www.vidking.net/embed/tv/${encodeURIComponent(tvId)}/${encodeURIComponent(season)}/${encodeURIComponent(ep)}`);
       }
 
       // ---------- Search ----------
@@ -2237,7 +2261,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         // just be the same /api/... path).
         const openOriginalBtn = isLocal
           ? ''
-          : `<a class="is-btn is-btn-ghost" href="${escapeHtml(g.url)}" target="_blank" rel="noopener">Open original</a>`;
+          : `<a class="is-btn is-btn-ghost is-btn-sm" href="${escapeHtml(g.url)}" target="_blank" rel="noopener">Open original</a>`;
         stageEl.innerHTML = `
           <div class="ia-player">
             <div class="ia-player-bar">
@@ -2245,6 +2269,9 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
               <div class="ia-player-source">${escapeHtml(g.source || '')}${isLocal ? ' · github' : ''}</div>
               <div style="flex:1"></div>
               ${openOriginalBtn}
+              <button class="is-iconbtn" data-act="player-fs" title="Fullscreen game (Esc twice to exit)">⛶</button>
+              <button class="is-iconbtn" data-act="player-min" title="Minimize">—</button>
+              <button class="is-iconbtn" data-act="player-close" title="Close">✕</button>
             </div>
             <iframe class="ia-player-frame"
                     src="${frameUrl}"
@@ -2252,6 +2279,25 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
                     allowfullscreen
                     referrerpolicy="no-referrer"></iframe>
           </div>`;
+        wirePlayerControls(g.name);
+      }
+
+      // Reusable wiring for the in-player chrome buttons. The min/close
+      // buttons just trigger the standard window-chrome handlers (so
+      // behaviour stays consistent with the OS title bar). Fullscreen
+      // calls into OS.enterGameFullscreen — see core.js.
+      function wirePlayerControls() {
+        const winEl = root.closest('.win');
+        stageEl.querySelector('[data-act="player-min"]')?.addEventListener('click', () => {
+          winEl?.querySelector('.win-min')?.click();
+        });
+        stageEl.querySelector('[data-act="player-close"]')?.addEventListener('click', () => {
+          winEl?.querySelector('.win-close')?.click();
+        });
+        stageEl.querySelector('[data-act="player-fs"]')?.addEventListener('click', () => {
+          const iframe = stageEl.querySelector('.ia-player-frame');
+          if (iframe && OS.enterGameFullscreen) OS.enterGameFullscreen(iframe);
+        });
       }
 
       // ---------- Wiring ----------
