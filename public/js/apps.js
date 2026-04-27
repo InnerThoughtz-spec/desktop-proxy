@@ -16,10 +16,10 @@
       // InnerStream: rounded screen frame with a tiny "i" (dot+stem) on the
       // left and a filled play triangle on the right. Reads as "i ▶".
       stream: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="8.6" r=".7" fill="currentColor" stroke="none"/><path d="M8 11v5.5"/><path d="M13 9.2l5.4 2.8L13 14.8z" fill="currentColor"/></svg>`,
-      // InnerArcade: classic arcade joystick — base, stick, ball top, two
-      // face buttons. Tall enough to fill the icon viewbox without looking
-      // squished at small sizes.
-      arcade: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><circle cx="12" cy="5" r="2.5" fill="currentColor" stroke="none"/><path d="M12 7.5v8"/><rect x="3" y="15" width="18" height="6" rx="2"/><circle cx="8" cy="18" r="1" fill="currentColor" stroke="none"/><circle cx="16" cy="18" r="1" fill="currentColor" stroke="none"/></svg>`,
+      // InnerArcade: gamepad controller — body with shoulder buttons, d-pad
+      // on the left, four face buttons on the right. Sized to fill the icon
+      // viewbox (top of shoulder triggers at y=5, bottom of grips at y=18).
+      arcade: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><path d="M7 5.5v2M17 5.5v2"/><path d="M3 12a5 5 0 015-5h8a5 5 0 015 5v3a3 3 0 01-5.5 1.7l-1-1.7h-5l-1 1.7A3 3 0 013 15z"/><path d="M6 12h3M7.5 10.5v3"/><circle cx="15" cy="10.5" r=".8" fill="currentColor" stroke="none"/><circle cx="17" cy="12" r=".8" fill="currentColor" stroke="none"/><circle cx="13" cy="12" r=".8" fill="currentColor" stroke="none"/><circle cx="15" cy="13.5" r=".8" fill="currentColor" stroke="none"/></svg>`,
     };
   })();
 
@@ -2196,41 +2196,58 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         backBtn.hidden = false;
         pushRecent(g.id);
         stageEl.innerHTML = `<div class="is-loading">Starting "${escapeHtml(g.name)}"…</div>`;
-        let proxiedUrl;
-        try {
-          await waitForUV(15000);
-          const eng = OS.proxy.engineFor(OS.proxy.getEngine());
-          if (!eng || typeof eng.encodeUrl !== 'function' || typeof eng.prefix !== 'function') {
-            throw new Error('proxy engine not available');
+        let frameUrl;
+        // Server-relative URLs (e.g. /api/arcade/gh/...) are served by *us*
+        // with the correct content-type — no proxy needed and no
+        // X-Frame-Options to dodge. Skipping the proxy here makes GN-Math
+        // games load even if the user's bare-server upstream is flaky.
+        // External URLs (Truffled, Selenite) still go through UV/Scramjet
+        // because their hosts set X-Frame-Options: deny.
+        const isLocal = typeof g.url === 'string' && g.url.startsWith('/');
+        if (isLocal) {
+          frameUrl = g.url;
+        } else {
+          try {
+            await waitForUV(15000);
+            const eng = OS.proxy.engineFor(OS.proxy.getEngine());
+            if (!eng || typeof eng.encodeUrl !== 'function' || typeof eng.prefix !== 'function') {
+              throw new Error('proxy engine not available');
+            }
+            if (typeof eng.available === 'function' && !eng.available()) {
+              throw new Error(`${eng.label || 'Proxy'} engine not loaded yet — try again in a moment, or switch engines in Settings → Proxy.`);
+            }
+            // CRITICAL: encodeUrl returns the *encoded* part only (e.g. base64).
+            // The SW only intercepts URLs that begin with the engine's prefix
+            // (e.g. /service/ for UV, /scram/ for Scramjet) — without it the
+            // request hits Express directly and serves our 404 page.
+            frameUrl = eng.prefix() + eng.encodeUrl(g.url);
+          } catch (e) {
+            stageEl.innerHTML = `
+              <div class="is-empty">
+                <div class="is-empty-title">Couldn't start game</div>
+                <div class="is-empty-sub">${escapeHtml(String(e.message || e))}</div>
+                <button class="is-btn is-btn-primary" data-act="back-to-grid">Back to library</button>
+              </div>`;
+            stageEl.querySelector('[data-act="back-to-grid"]')?.addEventListener('click', showGrid);
+            return;
           }
-          if (typeof eng.available === 'function' && !eng.available()) {
-            throw new Error(`${eng.label || 'Proxy'} engine not loaded yet — try again in a moment, or switch engines in Settings → Proxy.`);
-          }
-          // CRITICAL: encodeUrl returns the *encoded* part only (e.g. base64).
-          // The SW only intercepts URLs that begin with the engine's prefix
-          // (e.g. /service/ for UV, /scram/ for Scramjet) — without it the
-          // request hits Express directly and serves our 404 page.
-          proxiedUrl = eng.prefix() + eng.encodeUrl(g.url);
-        } catch (e) {
-          stageEl.innerHTML = `
-            <div class="is-empty">
-              <div class="is-empty-title">Couldn't start game</div>
-              <div class="is-empty-sub">${escapeHtml(String(e.message || e))}</div>
-              <button class="is-btn is-btn-primary" data-act="back-to-grid">Back to library</button>
-            </div>`;
-          stageEl.querySelector('[data-act="back-to-grid"]')?.addEventListener('click', showGrid);
-          return;
         }
+        // The "Open original" link only makes sense for external URLs —
+        // hide it for the local-proxied GN-Math games (the original would
+        // just be the same /api/... path).
+        const openOriginalBtn = isLocal
+          ? ''
+          : `<a class="is-btn is-btn-ghost" href="${escapeHtml(g.url)}" target="_blank" rel="noopener">Open original</a>`;
         stageEl.innerHTML = `
           <div class="ia-player">
             <div class="ia-player-bar">
               <div class="ia-player-title">${escapeHtml(g.name)}</div>
-              <div class="ia-player-source">${escapeHtml(g.source || '')}</div>
+              <div class="ia-player-source">${escapeHtml(g.source || '')}${isLocal ? ' · github' : ''}</div>
               <div style="flex:1"></div>
-              <a class="is-btn is-btn-ghost" href="${escapeHtml(g.url)}" target="_blank" rel="noopener">Open original</a>
+              ${openOriginalBtn}
             </div>
             <iframe class="ia-player-frame"
-                    src="${proxiedUrl}"
+                    src="${frameUrl}"
                     allow="autoplay; fullscreen; gamepad; pointer-lock; clipboard-read; clipboard-write"
                     allowfullscreen
                     referrerpolicy="no-referrer"></iframe>

@@ -202,16 +202,13 @@ function joinUrl(base, suffix) {
 
 function normalizeGNMath(data) {
   if (!Array.isArray(data)) return [];
-  // Two distinct hosts:
-  //   - {COVER_URL}: all 770+ cover PNGs live in the `gn-math/covers` repo.
-  //     gn-math.com only serves a fraction of them (most return its 404
-  //     page), so hotlink the raw github URL instead — it's stable and
-  //     served with the correct image content-type.
-  //   - {HTML_URL}:  the playable game wrappers live at gn-math.com/<file>.
-  //     We can't use raw.githubusercontent for these because it serves
-  //     html as text/plain, which iframes won't render.
-  const COVER_URL = 'https://raw.githubusercontent.com/gn-math/covers/main';
-  const HTML_URL  = 'https://gn-math.com';
+  // Both placeholders point at our /api/arcade/gh/* proxy, which fetches
+  // straight from the gn-math GitHub repos and re-streams with the right
+  // content-type. Covers come from gn-math/covers, game wrappers from
+  // gn-math/html, and the wrapper's embedded jsdelivr/githack references
+  // are rewritten on the fly so dependent assets load too.
+  const COVER_URL = '/api/arcade/gh/gn-math/covers/main';
+  const HTML_URL  = '/api/arcade/gh/gn-math/html/main';
   return data
     .filter((g) => g && typeof g.id === 'number' && g.id >= 0 && g.url && g.name)
     // Drop sentinel/placeholder entries (e.g. "[!] COMMENTS") — they look
@@ -291,6 +288,106 @@ async function buildArcadeManifest() {
     ts: Date.now(),
   };
 }
+
+// ----- GitHub raw proxy for InnerArcade -----
+// raw.githubusercontent.com serves all the gn-math game files (covers, html
+// wrappers, assets), but it ships HTML/JS/CSS as `text/plain` for security
+// — which means iframes won't render HTML, and <script> tags refuse to
+// execute. This endpoint re-streams the same bytes with the correct
+// content-type by file extension, and rewrites embedded jsdelivr/githack
+// URLs in HTML responses to point back at this same proxy (so the game's
+// dependent assets load from working hosts even when jsdelivr DMCA-blocks
+// the original org).
+//
+// Path format: /api/arcade/gh/:org/:repo/:branch/<...path>
+const GH_CT_BY_EXT = {
+  html: 'text/html; charset=utf-8',  htm: 'text/html; charset=utf-8',
+  js:   'application/javascript; charset=utf-8',
+  mjs:  'application/javascript; charset=utf-8',
+  cjs:  'application/javascript; charset=utf-8',
+  css:  'text/css; charset=utf-8',
+  json: 'application/json; charset=utf-8',
+  xml:  'application/xml; charset=utf-8',
+  svg:  'image/svg+xml',
+  png:  'image/png',  jpg: 'image/jpeg',  jpeg: 'image/jpeg',
+  gif:  'image/gif',  webp: 'image/webp', avif: 'image/avif',
+  ico:  'image/x-icon',
+  woff: 'font/woff',  woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
+  wasm: 'application/wasm',
+  mp3:  'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', flac: 'audio/flac',
+  mp4:  'video/mp4',  webm: 'video/webm', mov: 'video/quicktime',
+  swf:  'application/x-shockwave-flash',
+  txt:  'text/plain; charset=utf-8',
+  pdf:  'application/pdf',
+};
+function ghPathSafe(s) { return /^[a-zA-Z0-9._-]+$/.test(s); }
+
+app.get(/^\/api\/arcade\/gh\/([^/]+)\/([^/]+)\/([^/]+)\/(.*)$/, async (req, res) => {
+  const [org, repo, branch, subPath] = [req.params[0], req.params[1], req.params[2], req.params[3] || ''];
+  if (!ghPathSafe(org) || !ghPathSafe(repo) || !ghPathSafe(branch)) {
+    return res.status(400).send('bad path');
+  }
+  // Reject path traversal — subPath segments must each be safe-looking.
+  if (subPath.split('/').some((seg) => seg === '..' || /[<>?]/.test(seg))) {
+    return res.status(400).send('bad subpath');
+  }
+  const upstream = `https://raw.githubusercontent.com/${org}/${repo}/${branch}/${subPath}`;
+  try {
+    const r = await fetch(upstream, { headers: { 'user-agent': 'desktop-proxy/0.1' } });
+    if (!r.ok) {
+      res.status(r.status);
+      return res.type('text/plain').send(`upstream ${r.status} for ${org}/${repo}@${branch}/${subPath}`);
+    }
+    const ext = (subPath.split('.').pop() || '').toLowerCase();
+    const ct = GH_CT_BY_EXT[ext] || r.headers.get('content-type') || 'application/octet-stream';
+
+    res.setHeader('Content-Type', ct);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    // Some games expect the page to be cross-origin-isolated for SharedArrayBuffer.
+    // Letting the iframe send no referrer keeps strict hosts (cdn.jsdelivr) happy.
+    res.setHeader('Referrer-Policy', 'no-referrer');
+
+    const buf = Buffer.from(await r.arrayBuffer());
+
+    // For HTML, rewrite embedded CDN URLs to the same proxy so dependent
+    // assets resolve. We map jsdelivr's gh form, raw.githack, statically.io,
+    // and direct raw.githubusercontent links — anything else is left alone.
+    if (/^text\/html/.test(ct)) {
+      let html = buf.toString('utf-8');
+      // jsdelivr: https://cdn.jsdelivr.net/gh/<org>/<repo>@<branch>/<path>
+      html = html.replace(
+        /https?:\/\/cdn\.jsdelivr\.net\/gh\/([^/@"'\s]+)\/([^/@"'\s]+)@([^/"'\s]+)\//g,
+        '/api/arcade/gh/$1/$2/$3/'
+      );
+      // jsdelivr without explicit version (defaults to main):
+      html = html.replace(
+        /https?:\/\/cdn\.jsdelivr\.net\/gh\/([^/@"'\s]+)\/([^/@"'\s]+)\/(?!@)/g,
+        '/api/arcade/gh/$1/$2/main/'
+      );
+      // raw.githack / rawcdn.githack: https://(raw|rawcdn).githack.com/<org>/<repo>/<branch>/<path>
+      html = html.replace(
+        /https?:\/\/(?:raw|rawcdn)\.githack\.com\/([^/"'\s]+)\/([^/"'\s]+)\/([^/"'\s]+)\//g,
+        '/api/arcade/gh/$1/$2/$3/'
+      );
+      // statically.io: https://cdn.statically.io/gh/<org>/<repo>/<branch>/<path>
+      html = html.replace(
+        /https?:\/\/cdn\.statically\.io\/gh\/([^/"'\s]+)\/([^/"'\s]+)\/([^/"'\s]+)\//g,
+        '/api/arcade/gh/$1/$2/$3/'
+      );
+      // raw.githubusercontent direct (already same host as ours, but route
+      // through the proxy so content-type is correct):
+      html = html.replace(
+        /https?:\/\/raw\.githubusercontent\.com\/([^/"'\s]+)\/([^/"'\s]+)\/([^/"'\s]+)\//g,
+        '/api/arcade/gh/$1/$2/$3/'
+      );
+      return res.send(html);
+    }
+
+    res.send(buf);
+  } catch (e) {
+    res.status(502).type('text/plain').send('proxy failed: ' + e.message);
+  }
+});
 
 app.get('/api/arcade/games', async (_req, res) => {
   const now = Date.now();
