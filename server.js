@@ -289,113 +289,285 @@ async function buildArcadeManifest() {
   };
 }
 
-// ---------- Inntify music proxy (Piped) ----------
-// Inntify is our Spotify-clone music app. We don't ship a YouTube Music API
-// key (there's no official one) — instead we proxy a public Piped instance.
-// Piped is an open-source YouTube frontend with a clean JSON API and a
-// CORS-friendly stream proxy, so its audio URLs play directly in <audio>.
+// ---------- Inntify music backend (YouTube Music via youtubei.js) ----------
+// We use youtubei.js — the canonical JS implementation of YouTube's
+// internal API (the Node-native equivalent of Python's ytmusicapi). It
+// exposes a `yt.music` namespace that returns *YouTube Music* data
+// (curated playlists, charts, song-typed search) rather than generic
+// YouTube videos, so the catalog the Inntify UI shows is real music.
 //
-// Public Piped instances rotate frequently — kavin.rocks (the historical
-// default) is currently down. We try the configured instance first, then
-// fall back through a small list of known-alive hosts. Set PIPED_API to
-// pin a single instance (e.g. your self-hosted one) and skip the fallback.
-const PIPED_API = process.env.PIPED_API || '';
-const PIPED_FALLBACKS = [
-  'https://api.piped.private.coffee',
-  'https://pipedapi.kavin.rocks',
-  'https://pipedapi.adminforge.de',
-  'https://pipedapi.reallyaweso.me',
-];
-const PIPED_HOSTS = PIPED_API ? [PIPED_API] : PIPED_FALLBACKS;
+// Decipher requires a JS interpreter to run a small chunk of YouTube's
+// player JS (signature transform). We wire Node's built-in vm module
+// for this via Platform.shim.eval — the script is a function body that
+// uses `return`, so we wrap it in an IIFE.
+const vm = require('node:vm');
+let ytPromise = null;
+function getYT() {
+  if (ytPromise) return ytPromise;
+  ytPromise = (async () => {
+    const yt = require('youtubei.js');
+    const { Innertube, Platform } = yt;
+    Platform.shim.eval = (data, env = {}) => {
+      const ctx = { ...env, console, URL };
+      vm.createContext(ctx);
+      return vm.runInContext('(function() { ' + data.output + ' })()', ctx, {
+        timeout: 5000,
+      });
+    };
+    return await Innertube.create({ retrieve_player: true });
+  })().catch((e) => {
+    ytPromise = null;
+    throw e;
+  });
+  return ytPromise;
+}
 
 const MUSIC_TTL = 5 * 60 * 1000;
 const musicCache = new Map();
-// Index of the upstream that worked last — bias toward it so we don't
-// re-pay the timeout cost on every cold request.
-let pipedHostIdx = 0;
-
-async function piped(pathAndQuery) {
-  const cacheKey = pathAndQuery;
-  const now = Date.now();
-  const hit = musicCache.get(cacheKey);
-  if (hit && (now - hit.ts) < MUSIC_TTL) return hit.body;
-
-  // Try hosts in order, starting with the most-recently-successful one.
-  const hosts = [
-    PIPED_HOSTS[pipedHostIdx],
-    ...PIPED_HOSTS.filter((_, i) => i !== pipedHostIdx),
-  ];
-  let lastErr = null;
-  for (let i = 0; i < hosts.length; i++) {
-    const host = hosts[i];
-    try {
-      const r = await fetch(`${host}${pathAndQuery}`, {
-        headers: { 'accept': 'application/json', 'user-agent': 'desktop-proxy/0.1' },
-        signal: AbortSignal.timeout(7000),
-      });
-      if (!r.ok) { lastErr = new Error(`piped ${r.status} from ${host}`); continue; }
-      const ct = r.headers.get('content-type') || '';
-      if (!ct.includes('json')) { lastErr = new Error(`non-json from ${host}`); continue; }
-      const body = await r.json();
-      // Some instances 200 with "Service has been shutdown" plain text or
-      // an empty stub — treat empty {items:[]}/empty arrays as success
-      // (real "no results") only when the request was a search. For
-      // /streams we expect audioStreams; if not present, try the next host.
-      if (pathAndQuery.startsWith('/streams/') && (!body || !Array.isArray(body.audioStreams))) {
-        lastErr = new Error(`no audio streams from ${host}`); continue;
-      }
-      musicCache.set(cacheKey, { ts: now, body });
-      pipedHostIdx = PIPED_HOSTS.indexOf(host);
-      if (pipedHostIdx < 0) pipedHostIdx = 0;
-      // Soft-cap cache size.
-      if (musicCache.size > 500) {
-        const oldest = [...musicCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
-        if (oldest) musicCache.delete(oldest[0]);
-      }
-      return body;
-    } catch (e) {
-      lastErr = e;
-      continue;
-    }
-  }
-  const err = lastErr || new Error('all piped instances failed');
-  err.status = 502;
-  throw err;
+function cacheGet(key) {
+  const hit = musicCache.get(key);
+  if (hit && (Date.now() - hit.ts) < MUSIC_TTL) return hit.body;
+  return null;
 }
-
-function sendPiped(res, fn) {
-  fn().then(
-    (body) => { res.setHeader('Cache-Control', 'public, max-age=120'); res.json(body); },
-    (err) => res.status(err.status || 502).json({ error: 'piped_unavailable', detail: err.message })
-  );
+function cacheSet(key, body) {
+  musicCache.set(key, { ts: Date.now(), body });
+  if (musicCache.size > 500) {
+    const oldest = [...musicCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+    if (oldest) musicCache.delete(oldest[0]);
+  }
 }
 
 const safeYTId = (s) => /^[a-zA-Z0-9_-]{4,40}$/.test(s);
-const safePlaylistId = (s) => /^[a-zA-Z0-9_-]{4,80}$/.test(s);
 
-app.get('/api/music/search', (req, res) => {
-  const q = String(req.query.q || '').trim();
-  const filter = ['music_songs', 'music_albums', 'music_playlists', 'music_artists', 'all']
-    .includes(req.query.filter) ? req.query.filter : 'music_songs';
-  if (!q) return res.json({ items: [] });
-  sendPiped(res, () => piped(`/search?q=${encodeURIComponent(q)}&filter=${filter}`));
+// ----- Normalizers: turn youtubei.js's typed result objects into the flat
+// shape the client uses: { type, id, title, artist, album, cover, duration }.
+function pickThumb(thumbs) {
+  if (!Array.isArray(thumbs) || !thumbs.length) return '';
+  const sorted = [...thumbs].sort((a, b) => (b.width || 0) - (a.width || 0));
+  return sorted[0]?.url || '';
+}
+function txt(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v;
+  if (typeof v.text === 'string') return v.text;
+  if (typeof v.toString === 'function') return v.toString();
+  return '';
+}
+function normalizeSong(item) {
+  if (!item) return null;
+  const id = item.id || item.video_id || item.endpoint?.payload?.videoId;
+  if (!id) return null;
+  return {
+    type: 'track',
+    id,
+    title: txt(item.title) || txt(item.name) || '',
+    artist: (item.artists || []).map((a) => txt(a.name)).filter(Boolean).join(', ') ||
+            txt(item.author) || txt(item.subtitle) || '',
+    album: txt(item.album?.name) || '',
+    cover: pickThumb(item.thumbnails || item.thumbnail?.contents || []),
+    duration: typeof item.duration?.seconds === 'number' ? item.duration.seconds
+            : typeof item.duration === 'number' ? item.duration : 0,
+  };
+}
+function normalizePlaylist(item) {
+  if (!item) return null;
+  const id = item.id || item.endpoint?.payload?.browseId || item.endpoint?.payload?.playlistId;
+  if (!id) return null;
+  return {
+    type: 'playlist',
+    id: String(id).replace(/^VL/, ''),
+    title: txt(item.title) || txt(item.name) || '',
+    author: (item.author && txt(item.author.name)) || txt(item.subtitle) || '',
+    cover: pickThumb(item.thumbnails || item.thumbnail?.contents || []),
+    trackCount: item.item_count || item.song_count || 0,
+  };
+}
+function normalizeAlbum(item) {
+  if (!item) return null;
+  const id = item.id || item.endpoint?.payload?.browseId;
+  if (!id) return null;
+  return {
+    type: 'album',
+    id,
+    title: txt(item.title) || txt(item.name) || '',
+    artist: (item.artists || []).map((a) => txt(a.name)).filter(Boolean).join(', ') ||
+            txt(item.author) || txt(item.subtitle) || '',
+    cover: pickThumb(item.thumbnails || []),
+    year: item.year || '',
+  };
+}
+function normalizeArtist(item) {
+  if (!item) return null;
+  const id = item.id || item.endpoint?.payload?.browseId;
+  if (!id) return null;
+  return {
+    type: 'artist',
+    id,
+    title: txt(item.name) || txt(item.title) || '',
+    cover: pickThumb(item.thumbnails || []),
+  };
+}
+
+// ----- Endpoints -----
+
+app.get('/api/music/search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    const allowed = ['song', 'video', 'album', 'artist', 'playlist'];
+    const filter = allowed.includes(req.query.filter) ? req.query.filter : 'song';
+    if (!q) return res.json({ items: [] });
+    const cacheKey = `search:${filter}:${q.toLowerCase()}`;
+    const cached = cacheGet(cacheKey);
+    if (cached) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.json(cached);
+    }
+    const yt = await getYT();
+    const results = await yt.music.search(q, { type: filter });
+    const sectionByType = {
+      song: results.songs?.contents,
+      video: results.videos?.contents,
+      album: results.albums?.contents,
+      artist: results.artists?.contents,
+      playlist: results.playlists?.contents,
+    };
+    const raw = sectionByType[filter] || results.contents?.[0]?.contents || [];
+    const norm = filter === 'playlist' ? normalizePlaylist
+              : filter === 'album'    ? normalizeAlbum
+              : filter === 'artist'   ? normalizeArtist
+              :                          normalizeSong;
+    const items = [];
+    for (const it of raw) { const n = norm(it); if (n) items.push(n); }
+    const body = { items };
+    cacheSet(cacheKey, body);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json(body);
+  } catch (e) {
+    console.error('[music/search]', e.message);
+    res.status(502).json({ error: 'yt_unavailable', detail: e.message });
+  }
 });
 
-app.get('/api/music/track/:id', (req, res) => {
-  const id = String(req.params.id || '');
-  if (!safeYTId(id)) return res.status(400).json({ error: 'bad_id' });
-  sendPiped(res, () => piped(`/streams/${id}`));
+app.get('/api/music/track/:id', async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!safeYTId(id)) return res.status(400).json({ error: 'bad_id' });
+    const cached = cacheGet(`track:${id}`);
+    if (cached) {
+      res.setHeader('Cache-Control', 'private, max-age=60');
+      return res.json(cached);
+    }
+    const yt = await getYT();
+    const info = await yt.music.getInfo(id);
+    const formats = (info.streaming_data?.adaptive_formats || [])
+      .filter((f) => f.has_audio && !f.has_video)
+      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+    if (!formats.length) {
+      return res.status(404).json({ error: 'no_audio_streams' });
+    }
+    const audioStreams = [];
+    for (const f of formats) {
+      try {
+        const url = await f.decipher(yt.session.player);
+        audioStreams.push({
+          url,
+          mimeType: f.mime_type,
+          bitrate: f.bitrate || 0,
+          itag: f.itag,
+        });
+      } catch { /* skip bad format */ }
+    }
+    const body = {
+      title: info.basic_info.title,
+      uploader: info.basic_info.author,
+      duration: info.basic_info.duration,
+      thumbnailUrl: info.basic_info.thumbnail?.[0]?.url || '',
+      audioStreams,
+    };
+    cacheSet(`track:${id}`, body);
+    res.setHeader('Cache-Control', 'private, max-age=60');
+    res.json(body);
+  } catch (e) {
+    console.error('[music/track]', e.message);
+    res.status(502).json({ error: 'yt_unavailable', detail: e.message });
+  }
 });
 
-app.get('/api/music/playlist/:id', (req, res) => {
-  const id = String(req.params.id || '');
-  if (!safePlaylistId(id)) return res.status(400).json({ error: 'bad_id' });
-  sendPiped(res, () => piped(`/playlists/${id}`));
+app.get('/api/music/playlist/:id', async (req, res) => {
+  try {
+    const id = String(req.params.id || '');
+    if (!/^[a-zA-Z0-9_-]{4,80}$/.test(id)) return res.status(400).json({ error: 'bad_id' });
+    const cached = cacheGet(`playlist:${id}`);
+    if (cached) {
+      res.setHeader('Cache-Control', 'public, max-age=300');
+      return res.json(cached);
+    }
+    const yt = await getYT();
+    const pl = await yt.music.getPlaylist(id);
+    const rawTracks = pl.items || pl.contents || [];
+    const tracks = rawTracks.map(normalizeSong).filter(Boolean);
+    const body = {
+      id,
+      name: txt(pl.header?.title) || txt(pl.title) || 'Playlist',
+      description: txt(pl.header?.description) || txt(pl.description) || '',
+      thumbnailUrl: pickThumb(pl.header?.thumbnails || pl.thumbnails || []),
+      uploader: txt(pl.header?.author?.name) || txt(pl.author) || '',
+      relatedStreams: tracks,
+    };
+    cacheSet(`playlist:${id}`, body);
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.json(body);
+  } catch (e) {
+    console.error('[music/playlist]', e.message);
+    res.status(502).json({ error: 'yt_unavailable', detail: e.message });
+  }
 });
 
-app.get('/api/music/trending', (_req, res) => {
-  const region = String(_req.query.region || 'US').replace(/[^A-Z]/gi, '').slice(0, 2).toUpperCase() || 'US';
-  sendPiped(res, () => piped(`/trending?region=${region}`));
+app.get('/api/music/home', async (_req, res) => {
+  try {
+    const cached = cacheGet('home');
+    if (cached) {
+      res.setHeader('Cache-Control', 'public, max-age=600');
+      return res.json(cached);
+    }
+    const yt = await getYT();
+    const home = await yt.music.getHomeFeed();
+    const sections = [];
+    for (const sec of (home.sections || []).slice(0, 8)) {
+      const title = txt(sec.header?.title) || txt(sec.title) || '';
+      const items = [];
+      for (const it of (sec.contents || [])) {
+        // Dispatch by what the item's endpoint actually points at —
+        // youtubei.js MusicTwoRowItem can be track/playlist/album/artist
+        // depending on the payload. Checking endpoint type first avoids
+        // the bug where a playlist row gets normalized as a track because
+        // it happens to have an `id` field.
+        const ep = it.endpoint?.payload || {};
+        let n = null;
+        if (ep.videoId) n = normalizeSong(it);
+        else if (ep.playlistId) n = normalizePlaylist(it);
+        else if (ep.browseId) {
+          const b = String(ep.browseId);
+          if (b.startsWith('MPRE') || b.startsWith('MPLA')) n = normalizeAlbum(it);
+          else if (b.startsWith('UC') || b.startsWith('FEmusic_artist')) n = normalizeArtist(it);
+          else if (b.startsWith('VL') || b.startsWith('PL') || b.startsWith('RD')) n = normalizePlaylist(it);
+          else n = normalizePlaylist(it); // safe default for unknown browseIds
+        } else {
+          // No endpoint info — last-ditch attempt.
+          n = normalizeSong(it) || normalizePlaylist(it);
+        }
+        if (n) items.push(n);
+      }
+      if (items.length) sections.push({ title, items });
+    }
+    const body = { sections };
+    cacheSet('home', body);
+    res.setHeader('Cache-Control', 'public, max-age=600');
+    res.json(body);
+  } catch (e) {
+    console.error('[music/home]', e.message);
+    res.status(502).json({ error: 'yt_unavailable', detail: e.message });
+  }
 });
 
 // ----- GitHub raw proxy for InnerArcade -----

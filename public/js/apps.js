@@ -2367,6 +2367,29 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
   });
 
   // ---------- Inntify (custom in-OS music app) ----------
+  // Monochrome SVG transport icons. Using SVGs (not emoji) so they render
+  // as a single uniform foreground color across platforms — the user
+  // explicitly asked for the shuffle/repeat icons to be plain white, not
+  // the colored emoji that Windows substitutes for 🔀/🔁.
+  const SVG_ICONS = (() => {
+    const lineAttrs = `fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+    return {
+      play:    `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M7 5v14l12-7z"/></svg>`,
+      pause:   `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M6 4h4v16H6zM14 4h4v16h-4z"/></svg>`,
+      prev:    `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M6 5h2v14H6zM20 5L9 12l11 7z"/></svg>`,
+      next:    `<svg viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5l11 7-11 7z"/></svg>`,
+      // Lucide-style shuffle: two crossing arrows.
+      shuffle: `<svg viewBox="0 0 24 24" ${lineAttrs} aria-hidden="true"><polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/><polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/><line x1="4" y1="4" x2="9" y2="9"/></svg>`,
+      // Lucide-style loop arrow.
+      repeat:  `<svg viewBox="0 0 24 24" ${lineAttrs} aria-hidden="true"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>`,
+      // Same loop arrow + a "1" overlay for repeat-one mode.
+      repeat1: `<svg viewBox="0 0 24 24" ${lineAttrs} aria-hidden="true"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/><text x="12" y="15" font-size="7" stroke="none" fill="currentColor" text-anchor="middle" font-weight="bold" font-family="ui-sans-serif, system-ui">1</text></svg>`,
+      volume:  `<svg viewBox="0 0 24 24" ${lineAttrs} aria-hidden="true"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" fill="currentColor"/><path d="M15.5 8.5a5 5 0 010 7M19 5a10 10 0 010 14"/></svg>`,
+      close:   `<svg viewBox="0 0 24 24" ${lineAttrs} aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>`,
+      minimize:`<svg viewBox="0 0 24 24" ${lineAttrs} aria-hidden="true"><line x1="5" y1="12" x2="19" y2="12"/></svg>`,
+    };
+  })();
+
   // Spotify-style UI for browsing, searching, and playing music. The actual
   // audio engine (window.MusicPlayer, public/js/music.js) lives at body
   // level so playback continues when this app is minimized or closed —
@@ -2487,28 +2510,9 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         return j;
       }
 
-      // Piped's search returns items with /watch?v=ID URLs — pull the ID out.
-      function ytIdFromUrl(url) {
-        if (!url) return null;
-        const m = String(url).match(/[?&]v=([a-zA-Z0-9_-]+)/);
-        return m ? m[1] : null;
-      }
-      function playlistIdFromUrl(url) {
-        if (!url) return null;
-        const m = String(url).match(/[?&]list=([a-zA-Z0-9_-]+)/);
-        return m ? m[1] : null;
-      }
-      function trackFromPipedItem(it) {
-        const id = ytIdFromUrl(it.url);
-        if (!id) return null;
-        return {
-          id,
-          title: it.title || it.name || 'Untitled',
-          artist: it.uploaderName || it.uploader || '',
-          cover: it.thumbnail || it.thumbnailUrl || '',
-          duration: it.duration || 0,
-        };
-      }
+      // The server now returns a normalized shape per item:
+      //   { type: 'track'|'playlist'|'album'|'artist', id, title, artist|author, cover, duration, ... }
+      // No URL parsing needed client-side anymore.
 
       // ---------- Views ----------
       let currentView = 'home';
@@ -2517,18 +2521,24 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         currentView = 'home';
         stageEl.innerHTML = `<div class="is-loading">Loading…</div>`;
         try {
-          // We use Piped's "trending" endpoint as a stand-in for "Home"
-          // since Piped doesn't expose YouTube Music's curated home.
-          const trending = await api('/api/music/trending?region=US');
-          const list = (Array.isArray(trending) ? trending : (trending.items || trending)).filter((x) => x && x.url).slice(0, 30);
-          stageEl.innerHTML = `
+          // Real YT Music home — multiple curated sections (Quick picks,
+          // Trending, mood playlists, charts, etc.) instead of Piped's
+          // generic YouTube trending feed.
+          const home = await api('/api/music/home');
+          const sections = (home.sections || []).filter((s) => (s.items || []).length);
+          if (!sections.length) {
+            stageEl.innerHTML = `<div class="is-empty"><div class="is-empty-title">Couldn't load home feed</div></div>`;
+            return;
+          }
+          stageEl.innerHTML = sections.map((sec) => `
             <div class="it-section">
-              <h1 class="it-section-title">Trending now</h1>
+              <h1 class="it-section-title">${escapeHtml(sec.title || 'For you')}</h1>
               <div class="it-grid">
-                ${list.map((it) => trackTileHTML(it)).join('')}
+                ${sec.items.map(itemTileHTML).join('')}
               </div>
-            </div>`;
-          bindTrackTiles(list);
+            </div>
+          `).join('');
+          bindItemTiles();
         } catch (e) {
           showError(e);
         }
@@ -2564,12 +2574,16 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         sidebarEl.querySelectorAll('[data-view]').forEach((b) => b.classList.remove('is-active'));
         stageEl.innerHTML = `<div class="is-loading">Searching for "${escapeHtml(q)}"…</div>`;
         try {
-          const [songs, playlists] = await Promise.all([
-            api(`/api/music/search?q=${encodeURIComponent(q)}&filter=music_songs`),
-            api(`/api/music/search?q=${encodeURIComponent(q)}&filter=music_playlists`).catch(() => ({ items: [] })),
+          // Three parallel fetches against the YT Music search filters.
+          // Songs is the primary list; albums + playlists fill in below.
+          const [songs, albums, playlists] = await Promise.all([
+            api(`/api/music/search?q=${encodeURIComponent(q)}&filter=song`),
+            api(`/api/music/search?q=${encodeURIComponent(q)}&filter=album`).catch(() => ({ items: [] })),
+            api(`/api/music/search?q=${encodeURIComponent(q)}&filter=playlist`).catch(() => ({ items: [] })),
           ]);
-          const songItems = (songs.items || []).filter((x) => x && x.url).slice(0, 30);
-          const plItems = (playlists.items || []).filter((x) => x && x.url).slice(0, 12);
+          const songItems = (songs.items || []);
+          const albumItems = (albums.items || []).slice(0, 12);
+          const plItems = (playlists.items || []).slice(0, 12);
           stageEl.innerHTML = `
             ${songItems.length ? `
               <div class="it-section">
@@ -2578,26 +2592,31 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
                   <button class="is-btn is-btn-primary is-btn-sm" data-act="play-all">▶ Play all</button>
                 </div>
                 <div class="it-tracklist">
-                  ${songItems.map((it, i) => trackRowHTML(trackFromPipedItem(it) || {}, i, false)).join('')}
+                  ${songItems.map((t, i) => trackRowHTML(t, i, false)).join('')}
+                </div>
+              </div>` : ''}
+            ${albumItems.length ? `
+              <div class="it-section">
+                <h1 class="it-section-title">Albums</h1>
+                <div class="it-grid">
+                  ${albumItems.map(itemTileHTML).join('')}
                 </div>
               </div>` : ''}
             ${plItems.length ? `
               <div class="it-section">
                 <h1 class="it-section-title">Playlists</h1>
                 <div class="it-grid">
-                  ${plItems.map((p) => playlistTileHTML(p)).join('')}
+                  ${plItems.map(itemTileHTML).join('')}
                 </div>
               </div>` : ''}
-            ${(!songItems.length && !plItems.length)
-              ? `<div class="is-empty"><div class="is-empty-title">No results.</div></div>` : ''}
+            ${(!songItems.length && !albumItems.length && !plItems.length)
+              ? `<div class="is-empty"><div class="is-empty-title">No results for "${escapeHtml(q)}".</div></div>` : ''}
           `;
-          // Wire "Play all" to start the song list as the queue.
           stageEl.querySelector('[data-act="play-all"]')?.addEventListener('click', () => {
-            const tracks = songItems.map(trackFromPipedItem).filter(Boolean);
-            if (tracks.length) MusicPlayer.playQueue(tracks, 0);
+            if (songItems.length) MusicPlayer.playQueue(songItems, 0);
           });
-          bindTrackRowsWithList(songItems);
-          bindPlaylistTiles(plItems);
+          bindTrackRowsExplicit(songItems);
+          bindItemTiles();
           pushRecent(q);
         } catch (e) {
           showError(e);
@@ -2609,7 +2628,8 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         stageEl.innerHTML = `<div class="is-loading">Loading playlist…</div>`;
         try {
           const data = await api(`/api/music/playlist/${encodeURIComponent(id)}`);
-          const tracks = (data.relatedStreams || []).map(trackFromPipedItem).filter(Boolean);
+          // Server already normalized — relatedStreams is { id, title, artist, ... }.
+          const tracks = data.relatedStreams || [];
           stageEl.innerHTML = `
             <div class="it-section it-pl-hero">
               <div class="it-pl-cover">
@@ -2655,32 +2675,33 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       }
 
       // ---------- Card / row HTML ----------
-      function trackTileHTML(it) {
-        const id = ytIdFromUrl(it.url) || '';
-        const cover = it.thumbnail || it.thumbnailUrl || '';
-        const title = it.title || it.name || '';
-        const artist = it.uploaderName || it.uploader || '';
+      // One tile renderer for the whole catalog — switches the data-* hook
+      // by item.type so binders can dispatch correctly.
+      function itemTileHTML(it) {
+        const cover = it.cover || '';
+        const title = it.title || '';
+        const sub = it.type === 'track'
+          ? (it.artist || '')
+          : it.type === 'album'
+            ? (it.artist || it.year || 'Album')
+            : it.type === 'artist'
+              ? 'Artist'
+              : (it.author || 'Playlist');
+        const dataAttr = it.type === 'playlist' || it.type === 'album'
+          ? `data-playlist="${escapeHtml(it.id)}"`
+          : it.type === 'track'
+            ? `data-track="${escapeHtml(it.id)}"`
+            : `data-artist="${escapeHtml(it.id)}"`;
+        const fallbackGlyph = it.type === 'playlist' || it.type === 'album' ? '♫' : '♪';
+        const showPlay = it.type === 'track' || it.type === 'playlist' || it.type === 'album';
         return `
-          <button class="it-tile" data-track="${escapeHtml(id)}">
+          <button class="it-tile ${it.type === 'playlist' || it.type === 'album' ? 'it-tile-pl' : ''}" ${dataAttr} data-name="${escapeHtml(title)}">
             ${cover
               ? `<img class="it-tile-cover" src="${escapeHtml(cover)}" alt="" referrerpolicy="no-referrer" loading="lazy">`
-              : `<div class="it-tile-cover it-tile-blank">♪</div>`}
+              : `<div class="it-tile-cover it-tile-blank">${fallbackGlyph}</div>`}
             <div class="it-tile-title">${escapeHtml(title)}</div>
-            <div class="it-tile-sub">${escapeHtml(artist)}</div>
-            <span class="it-tile-play">▶</span>
-          </button>`;
-      }
-      function playlistTileHTML(p) {
-        const id = playlistIdFromUrl(p.url) || '';
-        const cover = p.thumbnail || p.thumbnailUrl || '';
-        const title = p.name || p.title || '';
-        return `
-          <button class="it-tile it-tile-pl" data-playlist="${escapeHtml(id)}" data-name="${escapeHtml(title)}">
-            ${cover
-              ? `<img class="it-tile-cover" src="${escapeHtml(cover)}" alt="" referrerpolicy="no-referrer" loading="lazy">`
-              : `<div class="it-tile-cover it-tile-blank">♫</div>`}
-            <div class="it-tile-title">${escapeHtml(title)}</div>
-            <div class="it-tile-sub">${escapeHtml(p.uploaderName || 'Playlist')}</div>
+            <div class="it-tile-sub">${escapeHtml(sub)}</div>
+            ${showPlay ? `<span class="it-tile-play">${SVG_ICONS.play}</span>` : ''}
           </button>`;
       }
       function trackRowHTML(t, i, isCurrent) {
@@ -2698,40 +2719,38 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
               <div class="it-row-artist">${escapeHtml(t.artist || '')}</div>
             </div>
             <div class="it-row-dur">${dur}</div>
-            <button class="it-row-play" data-act="row-play" title="Play">▶</button>
+            <button class="it-row-play" data-act="row-play" title="Play">${SVG_ICONS.play}</button>
           </div>`;
       }
 
-      function bindTrackTiles(items) {
-        stageEl.querySelectorAll('[data-track]').forEach((btn, i) => {
+      // One binder for all tiles. Tracks → play-as-single; playlists/albums
+      // → drill-in; artists currently no-op (TODO: artist page).
+      function bindItemTiles() {
+        stageEl.querySelectorAll('[data-track]').forEach((btn) => {
           btn.addEventListener('click', () => {
-            const tracks = items.map(trackFromPipedItem).filter(Boolean);
-            const t = trackFromPipedItem(items[i]);
-            if (t) MusicPlayer.playQueue(tracks, tracks.indexOf(t));
+            // Walk the current grid section to find sibling tracks for the queue.
+            const section = btn.closest('.it-grid');
+            const ids = section
+              ? [...section.querySelectorAll('[data-track]')].map((b) => b.dataset.track)
+              : [btn.dataset.track];
+            // Build minimal track stubs from the visible tile attributes; the
+            // player will fill in title/artist/cover from /api/music/track.
+            const tracks = ids.map((id) => ({ id, title: '', artist: '', cover: '' }));
+            const idx = Math.max(0, ids.indexOf(btn.dataset.track));
+            MusicPlayer.playQueue(tracks, idx);
           });
         });
-      }
-      function bindPlaylistTiles(items) {
         stageEl.querySelectorAll('[data-playlist]').forEach((btn) => {
           btn.addEventListener('click', () => showPlaylist(btn.dataset.playlist, btn.dataset.name));
         });
       }
       function bindTrackRows() {
-        // For library/queue view — just play the row's index in the current queue.
+        // Library/queue view — play the row's index in the current queue.
         stageEl.querySelectorAll('[data-row]').forEach((row) => {
           row.addEventListener('click', () => {
             const idx = parseInt(row.dataset.row, 10);
             const state = MusicPlayer.getState();
             if (state.queue[idx]) MusicPlayer.playQueue(state.queue, idx);
-          });
-        });
-      }
-      function bindTrackRowsWithList(items) {
-        const tracks = items.map(trackFromPipedItem).filter(Boolean);
-        stageEl.querySelectorAll('[data-row]').forEach((row) => {
-          row.addEventListener('click', () => {
-            const idx = parseInt(row.dataset.row, 10);
-            if (tracks[idx]) MusicPlayer.playQueue(tracks, idx);
           });
         });
       }
@@ -2747,8 +2766,8 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       // ---------- Now-playing bar ----------
       function nowPlayingHTML(state) {
         const t = state.track;
-        const playGlyph = state.isPlaying ? '⏸' : '▶';
-        const repeatGlyph = state.repeat === 'one' ? '🔂' : '🔁';
+        const playGlyph = state.isPlaying ? SVG_ICONS.pause : SVG_ICONS.play;
+        const repeatGlyph = state.repeat === 'one' ? SVG_ICONS.repeat1 : SVG_ICONS.repeat;
         return `
           <div class="it-now-track">
             ${t && t.cover
@@ -2761,10 +2780,10 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           </div>
           <div class="it-now-controls">
             <div class="it-now-buttons">
-              <button class="it-tx ${state.shuffle ? 'is-on' : ''}" data-act="shuffle" title="Shuffle">🔀</button>
-              <button class="it-tx" data-act="prev" title="Previous">⏮</button>
+              <button class="it-tx ${state.shuffle ? 'is-on' : ''}" data-act="shuffle" title="Shuffle">${SVG_ICONS.shuffle}</button>
+              <button class="it-tx" data-act="prev" title="Previous">${SVG_ICONS.prev}</button>
               <button class="it-tx it-tx-play" data-act="toggle" title="Play/Pause">${playGlyph}</button>
-              <button class="it-tx" data-act="next" title="Next">⏭</button>
+              <button class="it-tx" data-act="next" title="Next">${SVG_ICONS.next}</button>
               <button class="it-tx ${state.repeat !== 'off' ? 'is-on' : ''}" data-act="repeat" title="Repeat: ${state.repeat}">${repeatGlyph}</button>
             </div>
             <div class="it-now-progress">
@@ -2776,7 +2795,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
             </div>
           </div>
           <div class="it-now-extras">
-            <span class="it-now-vol">🔊</span>
+            <span class="it-now-vol">${SVG_ICONS.volume}</span>
             <input class="it-now-vol-slider" type="range" min="0" max="100"
                    value="${Math.round(state.volume * 100)}" data-act="volume"
                    title="Volume">
@@ -2794,7 +2813,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           if (times[0]) times[0].textContent = formatDuration(state.time);
           if (times[1]) times[1].textContent = formatDuration(state.duration);
           const playBtn = nowEl.querySelector('[data-act="toggle"]');
-          if (playBtn) playBtn.textContent = state.isPlaying ? '⏸' : '▶';
+          if (playBtn) playBtn.innerHTML = state.isPlaying ? SVG_ICONS.pause : SVG_ICONS.play;
           const t = state.track;
           const titleEl = nowEl.querySelector('.it-now-title');
           const artistEl = nowEl.querySelector('.it-now-artist');
@@ -2809,7 +2828,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           if (shuffleBtn) shuffleBtn.classList.toggle('is-on', state.shuffle);
           const repeatBtn = nowEl.querySelector('[data-act="repeat"]');
           if (repeatBtn) {
-            repeatBtn.textContent = state.repeat === 'one' ? '🔂' : '🔁';
+            repeatBtn.innerHTML = state.repeat === 'one' ? SVG_ICONS.repeat1 : SVG_ICONS.repeat;
             repeatBtn.classList.toggle('is-on', state.repeat !== 'off');
             repeatBtn.title = `Repeat: ${state.repeat}`;
           }

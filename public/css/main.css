@@ -1741,12 +1741,12 @@ input, textarea { font: inherit; color: inherit; }
   background: linear-gradient(135deg, #a8ffd8 0%, #7df9ff 100%);
   color: #0a0d12;
   display: flex; align-items: center; justify-content: center;
-  font-size: 14px;
   box-shadow: 0 6px 18px rgba(0,0,0,.5);
   opacity: 0;
   transform: translateY(8px);
   transition: opacity .15s var(--ease), transform .15s var(--ease);
 }
+.it-tile-play svg { width: 16px; height: 16px; }
 .it-tile:hover .it-tile-play {
   opacity: 1;
   transform: translateY(0);
@@ -1809,11 +1809,11 @@ input, textarea { font: inherit; color: inherit; }
   background: rgba(255,255,255,.08);
   color: #fff;
   display: flex; align-items: center; justify-content: center;
-  font-size: 11px;
   cursor: pointer;
   opacity: 0;
   transition: opacity .12s var(--ease), background .12s var(--ease);
 }
+.it-row-play svg { width: 12px; height: 12px; }
 .it-row:hover .it-row-play { opacity: 1; }
 .it-row-play:hover { background: linear-gradient(135deg, #a8ffd8 0%, #7df9ff 100%); color: #0a0d12; }
 
@@ -1898,25 +1898,39 @@ input, textarea { font: inherit; color: inherit; }
   width: 32px; height: 32px;
   display: flex; align-items: center; justify-content: center;
   background: transparent;
-  color: rgba(255,255,255,.7);
+  color: rgba(255,255,255,.85);
   border-radius: 50%;
-  font-size: 14px;
   cursor: pointer;
+  padding: 0;
   transition: color .12s var(--ease), transform .1s var(--ease), background .12s var(--ease);
 }
+.it-tx svg { width: 18px; height: 18px; display: block; }
 .it-tx:hover { color: #fff; }
 .it-tx:active { transform: scale(.95); }
-.it-tx.is-on { color: #a8ffd8; }
+/* "Active" state is white instead of mint so it stays clearly monochrome,
+   per the user's request — no colored emoji-style accent. */
+.it-tx.is-on { color: #fff; }
+.it-tx.is-on::after {
+  content: '';
+  position: absolute;
+  width: 4px; height: 4px;
+  border-radius: 50%;
+  background: #fff;
+  margin-top: 24px;
+}
+.it-tx { position: relative; }
 .it-tx-play {
-  width: 36px; height: 36px;
+  width: 38px; height: 38px;
   background: #fff;
   color: #0a0d12;
-  font-size: 13px;
 }
+.it-tx-play svg { width: 18px; height: 18px; }
 .it-tx-play:hover {
-  background: linear-gradient(135deg, #a8ffd8 0%, #7df9ff 100%);
-  transform: scale(1.05);
+  background: #fff;
+  transform: scale(1.06);
 }
+.it-tx-play.is-on::after { display: none; }
+.it-now-vol svg { width: 16px; height: 16px; display: block; opacity: .65; }
 .it-now-progress {
   display: flex; align-items: center; gap: 10px;
   width: min(540px, 100%);
