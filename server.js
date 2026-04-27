@@ -289,6 +289,115 @@ async function buildArcadeManifest() {
   };
 }
 
+// ---------- Inntify music proxy (Piped) ----------
+// Inntify is our Spotify-clone music app. We don't ship a YouTube Music API
+// key (there's no official one) — instead we proxy a public Piped instance.
+// Piped is an open-source YouTube frontend with a clean JSON API and a
+// CORS-friendly stream proxy, so its audio URLs play directly in <audio>.
+//
+// Public Piped instances rotate frequently — kavin.rocks (the historical
+// default) is currently down. We try the configured instance first, then
+// fall back through a small list of known-alive hosts. Set PIPED_API to
+// pin a single instance (e.g. your self-hosted one) and skip the fallback.
+const PIPED_API = process.env.PIPED_API || '';
+const PIPED_FALLBACKS = [
+  'https://api.piped.private.coffee',
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.reallyaweso.me',
+];
+const PIPED_HOSTS = PIPED_API ? [PIPED_API] : PIPED_FALLBACKS;
+
+const MUSIC_TTL = 5 * 60 * 1000;
+const musicCache = new Map();
+// Index of the upstream that worked last — bias toward it so we don't
+// re-pay the timeout cost on every cold request.
+let pipedHostIdx = 0;
+
+async function piped(pathAndQuery) {
+  const cacheKey = pathAndQuery;
+  const now = Date.now();
+  const hit = musicCache.get(cacheKey);
+  if (hit && (now - hit.ts) < MUSIC_TTL) return hit.body;
+
+  // Try hosts in order, starting with the most-recently-successful one.
+  const hosts = [
+    PIPED_HOSTS[pipedHostIdx],
+    ...PIPED_HOSTS.filter((_, i) => i !== pipedHostIdx),
+  ];
+  let lastErr = null;
+  for (let i = 0; i < hosts.length; i++) {
+    const host = hosts[i];
+    try {
+      const r = await fetch(`${host}${pathAndQuery}`, {
+        headers: { 'accept': 'application/json', 'user-agent': 'desktop-proxy/0.1' },
+        signal: AbortSignal.timeout(7000),
+      });
+      if (!r.ok) { lastErr = new Error(`piped ${r.status} from ${host}`); continue; }
+      const ct = r.headers.get('content-type') || '';
+      if (!ct.includes('json')) { lastErr = new Error(`non-json from ${host}`); continue; }
+      const body = await r.json();
+      // Some instances 200 with "Service has been shutdown" plain text or
+      // an empty stub — treat empty {items:[]}/empty arrays as success
+      // (real "no results") only when the request was a search. For
+      // /streams we expect audioStreams; if not present, try the next host.
+      if (pathAndQuery.startsWith('/streams/') && (!body || !Array.isArray(body.audioStreams))) {
+        lastErr = new Error(`no audio streams from ${host}`); continue;
+      }
+      musicCache.set(cacheKey, { ts: now, body });
+      pipedHostIdx = PIPED_HOSTS.indexOf(host);
+      if (pipedHostIdx < 0) pipedHostIdx = 0;
+      // Soft-cap cache size.
+      if (musicCache.size > 500) {
+        const oldest = [...musicCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
+        if (oldest) musicCache.delete(oldest[0]);
+      }
+      return body;
+    } catch (e) {
+      lastErr = e;
+      continue;
+    }
+  }
+  const err = lastErr || new Error('all piped instances failed');
+  err.status = 502;
+  throw err;
+}
+
+function sendPiped(res, fn) {
+  fn().then(
+    (body) => { res.setHeader('Cache-Control', 'public, max-age=120'); res.json(body); },
+    (err) => res.status(err.status || 502).json({ error: 'piped_unavailable', detail: err.message })
+  );
+}
+
+const safeYTId = (s) => /^[a-zA-Z0-9_-]{4,40}$/.test(s);
+const safePlaylistId = (s) => /^[a-zA-Z0-9_-]{4,80}$/.test(s);
+
+app.get('/api/music/search', (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const filter = ['music_songs', 'music_albums', 'music_playlists', 'music_artists', 'all']
+    .includes(req.query.filter) ? req.query.filter : 'music_songs';
+  if (!q) return res.json({ items: [] });
+  sendPiped(res, () => piped(`/search?q=${encodeURIComponent(q)}&filter=${filter}`));
+});
+
+app.get('/api/music/track/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  if (!safeYTId(id)) return res.status(400).json({ error: 'bad_id' });
+  sendPiped(res, () => piped(`/streams/${id}`));
+});
+
+app.get('/api/music/playlist/:id', (req, res) => {
+  const id = String(req.params.id || '');
+  if (!safePlaylistId(id)) return res.status(400).json({ error: 'bad_id' });
+  sendPiped(res, () => piped(`/playlists/${id}`));
+});
+
+app.get('/api/music/trending', (_req, res) => {
+  const region = String(_req.query.region || 'US').replace(/[^A-Z]/gi, '').slice(0, 2).toUpperCase() || 'US';
+  sendPiped(res, () => piped(`/trending?region=${region}`));
+});
+
 // ----- GitHub raw proxy for InnerArcade -----
 // raw.githubusercontent.com serves all the gn-math game files (covers, html
 // wrappers, assets), but it ships HTML/JS/CSS as `text/plain` for security

@@ -10,13 +10,14 @@
     accent2: '#b28aff',
     // wallpaper: { kind: 'preset'|'image'|'gif'|'video'|'url'|'server', value: <key|wpId|url|serverId>, meta? }
     wallpaper: { kind: 'preset', value: 'rainDusk' },
-    pinned: ['browser', 'inner-stream', 'inner-arcade', 'files', 'settings', 'about'],
+    pinned: ['browser', 'inner-movies', 'inner-arcade', 'inntify', 'files', 'settings', 'about'],
     // Desktop icons: [{ id, appId, x, y }]
     desktopIcons: [
-      { id: 'di_browser', appId: 'browser',     x: 24, y: 88 },
-      { id: 'di_stream',  appId: 'inner-stream', x: 24, y: 200 },
+      { id: 'di_browser', appId: 'browser',      x: 24, y: 88 },
+      { id: 'di_movies',  appId: 'inner-movies', x: 24, y: 200 },
       { id: 'di_arcade',  appId: 'inner-arcade', x: 24, y: 312 },
-      { id: 'di_files',   appId: 'files',        x: 24, y: 424 },
+      { id: 'di_inntify', appId: 'inntify',      x: 24, y: 424 },
+      { id: 'di_files',   appId: 'files',        x: 24, y: 536 },
     ],
     locked: true,
     fpsVisible: true,
@@ -137,8 +138,17 @@
       // Ensure the default pinned set includes apps added after a user's
       // first visit. Only adds; never removes a user-removed pin.
       if (!Array.isArray(merged.pinned)) merged.pinned = [];
-      for (const id of ['inner-stream', 'inner-arcade']) {
+      // Rename: 'inner-stream' → 'inner-movies' (preserves position).
+      const sIdx = merged.pinned.indexOf('inner-stream');
+      if (sIdx >= 0) merged.pinned[sIdx] = 'inner-movies';
+      for (const id of ['inner-movies', 'inner-arcade', 'inntify']) {
         if (!merged.pinned.includes(id)) merged.pinned.push(id);
+      }
+      // Same rename in desktopIcons for users that pinned the old icon.
+      if (Array.isArray(merged.desktopIcons)) {
+        for (const it of merged.desktopIcons) {
+          if (it.appId === 'inner-stream') it.appId = 'inner-movies';
+        }
       }
       return merged;
     } catch {

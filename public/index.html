@@ -177,6 +177,10 @@
 
 <script src="/js/storage.js" defer></script>
 <script src="/js/core.js" defer></script>
+<!-- Inntify global music player. Audio element lives at body level so
+     playback survives the app being closed/minimized. Loaded before
+     apps.js so the registry is ready when the Inntify app mounts. -->
+<script src="/js/music.js" defer></script>
 <script src="/js/apps.js" defer></script>
 </body>
 </html>

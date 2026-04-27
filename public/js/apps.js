@@ -13,9 +13,11 @@
       gear: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09a1.65 1.65 0 00-1-1.51 1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09a1.65 1.65 0 001.51-1 1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33h0a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82v0a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>`,
       folder: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V7z"/></svg>`,
       info: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><circle cx="12" cy="12" r="9"/><path d="M12 11v5"/><circle cx="12" cy="8" r=".5" fill="currentColor"/></svg>`,
-      // InnerStream: rounded screen frame with a tiny "i" (dot+stem) on the
+      // InnerMovies: rounded screen frame with a tiny "i" (dot+stem) on the
       // left and a filled play triangle on the right. Reads as "i ▶".
-      stream: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="8.6" r=".7" fill="currentColor" stroke="none"/><path d="M8 11v5.5"/><path d="M13 9.2l5.4 2.8L13 14.8z" fill="currentColor"/></svg>`,
+      movies: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="8.6" r=".7" fill="currentColor" stroke="none"/><path d="M8 11v5.5"/><path d="M13 9.2l5.4 2.8L13 14.8z" fill="currentColor"/></svg>`,
+      // Inntify: musical eighth-note pair with filled noteheads + connecting beam.
+      music: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><circle cx="9" cy="17" r="2.5" fill="currentColor" stroke="none"/><circle cx="19" cy="14" r="2" fill="currentColor" stroke="none"/><path d="M9 14.5V5l12-2v9"/></svg>`,
       // InnerArcade: gamepad controller — body with shoulder buttons, d-pad
       // on the left, four face buttons on the right. Sized to fill the icon
       // viewbox (top of shoulder triggers at y=5, bottom of grips at y=18).
@@ -27,7 +29,7 @@
   // The first entry is *not* a real brand — it's our self-hosted streaming app.
   // Setting `appId` instead of `url` tells the click handler to pin/open the
   // built-in app rather than create a URL-based browser shortcut.
-  const INNER_STREAM_DATA_URI =
+  const INNER_MOVIES_DATA_URI =
     "data:image/svg+xml;utf8," + encodeURIComponent(
       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
         <defs>
@@ -70,10 +72,30 @@
         <circle cx="38" cy="34" r="1.6" fill="url(#ag)"/>
         <circle cx="44" cy="38" r="1.6" fill="url(#ag)"/>
       </svg>`);
+  const INNTIFY_DATA_URI =
+    "data:image/svg+xml;utf8," + encodeURIComponent(
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+        <defs>
+          <linearGradient id="tg" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0" stop-color="#a8ffd8"/>
+            <stop offset="1" stop-color="#7df9ff"/>
+          </linearGradient>
+          <filter id="tb" x="-20%" y="-20%" width="140%" height="140%">
+            <feGaussianBlur stdDeviation="1.2"/>
+          </filter>
+        </defs>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="#0b0d12"/>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="none" stroke="url(#tg)" stroke-width="2" filter="url(#tb)" opacity=".85"/>
+        <rect x="3" y="3" width="58" height="58" rx="14" fill="none" stroke="url(#tg)" stroke-width="1.4"/>
+        <ellipse cx="22" cy="42" rx="6" ry="5" fill="url(#tg)" filter="url(#tb)" opacity=".85"/>
+        <ellipse cx="22" cy="42" rx="6" ry="5" fill="url(#tg)"/>
+        <ellipse cx="44" cy="36" rx="5" ry="4.2" fill="url(#tg)"/>
+        <path d="M28 42 V18 L49 14 V36" fill="none" stroke="url(#tg)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>`);
   const BRAND_PRESETS = [
-    { slug: 'inner-stream', name: 'InnerStream', appId: 'inner-stream', iconURL: INNER_STREAM_DATA_URI },
+    { slug: 'inner-movies', name: 'InnerMovies', appId: 'inner-movies', iconURL: INNER_MOVIES_DATA_URI },
     { slug: 'inner-arcade', name: 'InnerArcade', appId: 'inner-arcade', iconURL: INNER_ARCADE_DATA_URI },
-    { slug: 'spotify',     name: 'Spotify',     url: 'https://open.spotify.com/',         color: '1DB954' },
+    { slug: 'inntify',      name: 'Inntify',     appId: 'inntify',      iconURL: INNTIFY_DATA_URI },
     { slug: 'youtube',     name: 'YouTube',     url: 'https://www.youtube.com/',          color: 'FF0000' },
     { slug: 'discord',     name: 'Discord',     url: 'https://discord.com/app',           color: '5865F2' },
     { slug: 'nvidia',      name: 'GeForce NOW', url: 'https://play.geforcenow.com/',      color: '76B900' },
@@ -1583,16 +1605,16 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
     return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${u[i]}`;
   }
 
-  // ---------- InnerStream (custom in-OS streaming app) ----------
+  // ---------- InnerMovies (custom in-OS streaming app) ----------
   // Metadata and posters come from TMDB (proxied through /api/cinema/* so we
   // don't ship the API key client-side). Actual *playback* uses vidking.net
   // embed URLs:
   //   https://www.vidking.net/embed/movie/{tmdb_id}
   //   https://www.vidking.net/embed/tv/{tmdb_id}/{season}/{episode}
   // The first paint is a black, neon-glow splash that says the app's name.
-  OS.registerApp('inner-stream', {
-    title: 'InnerStream',
-    glyphSVG: SVG.stream,
+  OS.registerApp('inner-movies', {
+    title: 'InnerMovies',
+    glyphSVG: SVG.movies,
     singleInstance: true,
     defaultW: 1180, defaultH: 760,
     mount(root) {
@@ -1606,7 +1628,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           <div class="is-main" data-role="main" hidden>
             <div class="is-topbar">
               <button class="is-iconbtn" data-act="back" hidden title="Back">‹</button>
-              <div class="is-wordmark">Inner<b>Stream</b></div>
+              <div class="is-wordmark">Inner<b>Movies</b></div>
               <div class="is-search">
                 <input data-role="search" placeholder="Search movies, shows…" spellcheck="false" autocomplete="off">
               </div>
@@ -1627,7 +1649,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
 
       // Splash letters — render each glyph as its own span so we can drive
       // the per-letter neon flicker animation.
-      const NAME = 'InnerStream';
+      const NAME = 'InnerMovies';
       const lettersEl = root.querySelector('[data-role="splash-letters"]');
       lettersEl.innerHTML = '';
       [...NAME].forEach((ch, i) => {
@@ -1688,7 +1710,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         } catch (e) {
           stageEl.innerHTML = `
             <div class="is-empty">
-              <div class="is-empty-title">Couldn't load InnerStream</div>
+              <div class="is-empty-title">Couldn't load InnerMovies</div>
               <div class="is-empty-sub">${escapeHtml(String(e.message || e))}</div>
               <button class="is-btn is-btn-primary" data-act="retry">Try again</button>
             </div>`;
@@ -2343,6 +2365,517 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       showGrid();
     },
   });
+
+  // ---------- Inntify (custom in-OS music app) ----------
+  // Spotify-style UI for browsing, searching, and playing music. The actual
+  // audio engine (window.MusicPlayer, public/js/music.js) lives at body
+  // level so playback continues when this app is minimized or closed —
+  // re-opening shows the still-playing track in the now-playing bar.
+  // Search + metadata + audio streams come from the Piped API (see
+  // /api/music/* in server.js).
+  OS.registerApp('inntify', {
+    title: 'Inntify',
+    glyphSVG: SVG.music,
+    singleInstance: true,
+    defaultW: 1120, defaultH: 720,
+    mount(root) {
+      root.innerHTML = `
+        <div class="is-app it-app">
+          <div class="is-splash it-splash" data-role="splash">
+            <div class="is-splash-glow"></div>
+            <div class="is-splash-name" data-role="splash-letters"></div>
+            <div class="is-splash-tag">your private soundstage</div>
+          </div>
+          <div class="is-main" data-role="main" hidden>
+            <div class="is-topbar">
+              <button class="is-iconbtn" data-act="back" hidden title="Back">‹</button>
+              <div class="is-wordmark">Inn<b>tify</b></div>
+              <div class="is-search">
+                <input data-role="search" placeholder="Search songs, artists, albums…" spellcheck="false" autocomplete="off">
+              </div>
+              <button class="is-iconbtn" data-act="player-min" title="Minimize">—</button>
+              <button class="is-iconbtn" data-act="player-close" title="Close">✕</button>
+            </div>
+            <div class="it-body">
+              <aside class="it-sidebar">
+                <button class="it-side-item is-active" data-view="home"><span>Home</span></button>
+                <button class="it-side-item" data-view="library"><span>Your Library</span></button>
+                <div class="it-side-label">Recent searches</div>
+                <div class="it-side-list" data-role="recent-searches"></div>
+              </aside>
+              <div class="it-stage" data-role="stage"></div>
+            </div>
+            <div class="it-now" data-role="nowplaying">
+              ${nowPlayingHTML(MusicPlayer.getState())}
+            </div>
+          </div>
+        </div>`;
+
+      const splashEl  = root.querySelector('[data-role="splash"]');
+      const mainEl    = root.querySelector('[data-role="main"]');
+      const stageEl   = root.querySelector('[data-role="stage"]');
+      const searchEl  = root.querySelector('[data-role="search"]');
+      const sidebarEl = root.querySelector('.it-sidebar');
+      const nowEl     = root.querySelector('[data-role="nowplaying"]');
+      const recentEl  = root.querySelector('[data-role="recent-searches"]');
+      const winEl     = root.closest('.win');
+
+      // Splash with neon flicker.
+      const NAME = 'Inntify';
+      const lettersEl = root.querySelector('[data-role="splash-letters"]');
+      lettersEl.innerHTML = '';
+      [...NAME].forEach((ch, i) => {
+        const s = document.createElement('span');
+        s.className = 'is-letter';
+        s.style.animationDelay = (i * 0.07) + 's';
+        s.textContent = ch === ' ' ? ' ' : ch;
+        lettersEl.appendChild(s);
+      });
+      setTimeout(() => { splashEl.classList.add('is-out'); mainEl.hidden = false; }, 2200);
+      setTimeout(() => { splashEl.style.display = 'none'; }, 3000);
+
+      // Recent searches in localStorage.
+      const RECENT_KEY = 'inntify.recent';
+      function readRecent() {
+        try { return JSON.parse(localStorage.getItem(RECENT_KEY) || '[]'); } catch { return []; }
+      }
+      function pushRecent(q) {
+        const cur = readRecent().filter((x) => x !== q);
+        cur.unshift(q);
+        try { localStorage.setItem(RECENT_KEY, JSON.stringify(cur.slice(0, 8))); } catch {}
+        renderRecent();
+      }
+      function renderRecent() {
+        const list = readRecent();
+        recentEl.innerHTML = list.length
+          ? list.map((q) => `<button class="it-side-recent" data-recent="${escapeHtml(q)}">${escapeHtml(q)}</button>`).join('')
+          : `<div class="it-side-empty">No recent searches.</div>`;
+        recentEl.querySelectorAll('[data-recent]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            searchEl.value = btn.dataset.recent;
+            doSearch(btn.dataset.recent);
+          });
+        });
+      }
+      renderRecent();
+
+      // Sidebar nav.
+      sidebarEl.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-view]');
+        if (!t) return;
+        sidebarEl.querySelectorAll('[data-view]').forEach((b) => b.classList.toggle('is-active', b === t));
+        if (t.dataset.view === 'home') showHome();
+        else if (t.dataset.view === 'library') showLibrary();
+      });
+
+      // Min/close (no fullscreen for music — doesn't make sense).
+      root.querySelector('[data-act="player-min"]')?.addEventListener('click', () => {
+        winEl?.querySelector('.win-min')?.click();
+      });
+      root.querySelector('[data-act="player-close"]')?.addEventListener('click', () => {
+        winEl?.querySelector('.win-close')?.click();
+      });
+
+      // ---------- API helpers ----------
+      const cache = Object.create(null);
+      async function api(endpoint) {
+        if (cache[endpoint]) return cache[endpoint];
+        const r = await fetch(endpoint);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        cache[endpoint] = j;
+        return j;
+      }
+
+      // Piped's search returns items with /watch?v=ID URLs — pull the ID out.
+      function ytIdFromUrl(url) {
+        if (!url) return null;
+        const m = String(url).match(/[?&]v=([a-zA-Z0-9_-]+)/);
+        return m ? m[1] : null;
+      }
+      function playlistIdFromUrl(url) {
+        if (!url) return null;
+        const m = String(url).match(/[?&]list=([a-zA-Z0-9_-]+)/);
+        return m ? m[1] : null;
+      }
+      function trackFromPipedItem(it) {
+        const id = ytIdFromUrl(it.url);
+        if (!id) return null;
+        return {
+          id,
+          title: it.title || it.name || 'Untitled',
+          artist: it.uploaderName || it.uploader || '',
+          cover: it.thumbnail || it.thumbnailUrl || '',
+          duration: it.duration || 0,
+        };
+      }
+
+      // ---------- Views ----------
+      let currentView = 'home';
+
+      async function showHome() {
+        currentView = 'home';
+        stageEl.innerHTML = `<div class="is-loading">Loading…</div>`;
+        try {
+          // We use Piped's "trending" endpoint as a stand-in for "Home"
+          // since Piped doesn't expose YouTube Music's curated home.
+          const trending = await api('/api/music/trending?region=US');
+          const list = (Array.isArray(trending) ? trending : (trending.items || trending)).filter((x) => x && x.url).slice(0, 30);
+          stageEl.innerHTML = `
+            <div class="it-section">
+              <h1 class="it-section-title">Trending now</h1>
+              <div class="it-grid">
+                ${list.map((it) => trackTileHTML(it)).join('')}
+              </div>
+            </div>`;
+          bindTrackTiles(list);
+        } catch (e) {
+          showError(e);
+        }
+      }
+
+      function showLibrary() {
+        currentView = 'library';
+        const state = MusicPlayer.getState();
+        const q = state.queue || [];
+        stageEl.innerHTML = `
+          <div class="it-section">
+            <h1 class="it-section-title">Now in queue</h1>
+            ${q.length
+              ? `<div class="it-tracklist">
+                  ${q.map((t, i) => trackRowHTML(t, i, i === state.currentIdx)).join('')}
+                 </div>`
+              : `<div class="is-empty"><div class="is-empty-title">Queue is empty</div>
+                 <div class="is-empty-sub">Search for a song and hit play.</div></div>`}
+          </div>`;
+        bindTrackRows();
+      }
+
+      let typingTimer = null;
+      searchEl.addEventListener('input', () => {
+        clearTimeout(typingTimer);
+        const q = searchEl.value.trim();
+        if (!q) { showHome(); return; }
+        typingTimer = setTimeout(() => doSearch(q), 280);
+      });
+
+      async function doSearch(q) {
+        currentView = 'search';
+        sidebarEl.querySelectorAll('[data-view]').forEach((b) => b.classList.remove('is-active'));
+        stageEl.innerHTML = `<div class="is-loading">Searching for "${escapeHtml(q)}"…</div>`;
+        try {
+          const [songs, playlists] = await Promise.all([
+            api(`/api/music/search?q=${encodeURIComponent(q)}&filter=music_songs`),
+            api(`/api/music/search?q=${encodeURIComponent(q)}&filter=music_playlists`).catch(() => ({ items: [] })),
+          ]);
+          const songItems = (songs.items || []).filter((x) => x && x.url).slice(0, 30);
+          const plItems = (playlists.items || []).filter((x) => x && x.url).slice(0, 12);
+          stageEl.innerHTML = `
+            ${songItems.length ? `
+              <div class="it-section">
+                <div class="it-section-head">
+                  <h1 class="it-section-title">Songs</h1>
+                  <button class="is-btn is-btn-primary is-btn-sm" data-act="play-all">▶ Play all</button>
+                </div>
+                <div class="it-tracklist">
+                  ${songItems.map((it, i) => trackRowHTML(trackFromPipedItem(it) || {}, i, false)).join('')}
+                </div>
+              </div>` : ''}
+            ${plItems.length ? `
+              <div class="it-section">
+                <h1 class="it-section-title">Playlists</h1>
+                <div class="it-grid">
+                  ${plItems.map((p) => playlistTileHTML(p)).join('')}
+                </div>
+              </div>` : ''}
+            ${(!songItems.length && !plItems.length)
+              ? `<div class="is-empty"><div class="is-empty-title">No results.</div></div>` : ''}
+          `;
+          // Wire "Play all" to start the song list as the queue.
+          stageEl.querySelector('[data-act="play-all"]')?.addEventListener('click', () => {
+            const tracks = songItems.map(trackFromPipedItem).filter(Boolean);
+            if (tracks.length) MusicPlayer.playQueue(tracks, 0);
+          });
+          bindTrackRowsWithList(songItems);
+          bindPlaylistTiles(plItems);
+          pushRecent(q);
+        } catch (e) {
+          showError(e);
+        }
+      }
+
+      async function showPlaylist(id, name) {
+        currentView = 'playlist';
+        stageEl.innerHTML = `<div class="is-loading">Loading playlist…</div>`;
+        try {
+          const data = await api(`/api/music/playlist/${encodeURIComponent(id)}`);
+          const tracks = (data.relatedStreams || []).map(trackFromPipedItem).filter(Boolean);
+          stageEl.innerHTML = `
+            <div class="it-section it-pl-hero">
+              <div class="it-pl-cover">
+                ${data.thumbnailUrl ? `<img src="${escapeHtml(data.thumbnailUrl)}" alt="" referrerpolicy="no-referrer">` : ''}
+              </div>
+              <div class="it-pl-meta">
+                <div class="it-pl-kind">Playlist</div>
+                <h1 class="it-pl-title">${escapeHtml(data.name || name || 'Playlist')}</h1>
+                <div class="it-pl-sub">${escapeHtml(data.uploader || '')} · ${tracks.length} song${tracks.length === 1 ? '' : 's'}</div>
+                <div class="it-pl-actions">
+                  <button class="is-btn is-btn-primary" data-act="pl-play">▶ Play</button>
+                  <button class="is-btn is-btn-ghost" data-act="pl-shuffle">🔀 Shuffle</button>
+                </div>
+              </div>
+            </div>
+            <div class="it-section">
+              <div class="it-tracklist">
+                ${tracks.map((t, i) => trackRowHTML(t, i, false)).join('')}
+              </div>
+            </div>`;
+          stageEl.querySelector('[data-act="pl-play"]')?.addEventListener('click', () => {
+            MusicPlayer.setShuffle(false);
+            MusicPlayer.playQueue(tracks, 0);
+          });
+          stageEl.querySelector('[data-act="pl-shuffle"]')?.addEventListener('click', () => {
+            MusicPlayer.setShuffle(true);
+            MusicPlayer.playQueue(tracks, Math.floor(Math.random() * tracks.length));
+          });
+          bindTrackRowsExplicit(tracks);
+        } catch (e) {
+          showError(e);
+        }
+      }
+
+      function showError(e) {
+        stageEl.innerHTML = `
+          <div class="is-empty">
+            <div class="is-empty-title">Couldn't load Inntify</div>
+            <div class="is-empty-sub">${escapeHtml(String(e.message || e))}</div>
+            <button class="is-btn is-btn-primary" data-act="retry">Try again</button>
+          </div>`;
+        stageEl.querySelector('[data-act="retry"]')?.addEventListener('click', showHome);
+      }
+
+      // ---------- Card / row HTML ----------
+      function trackTileHTML(it) {
+        const id = ytIdFromUrl(it.url) || '';
+        const cover = it.thumbnail || it.thumbnailUrl || '';
+        const title = it.title || it.name || '';
+        const artist = it.uploaderName || it.uploader || '';
+        return `
+          <button class="it-tile" data-track="${escapeHtml(id)}">
+            ${cover
+              ? `<img class="it-tile-cover" src="${escapeHtml(cover)}" alt="" referrerpolicy="no-referrer" loading="lazy">`
+              : `<div class="it-tile-cover it-tile-blank">♪</div>`}
+            <div class="it-tile-title">${escapeHtml(title)}</div>
+            <div class="it-tile-sub">${escapeHtml(artist)}</div>
+            <span class="it-tile-play">▶</span>
+          </button>`;
+      }
+      function playlistTileHTML(p) {
+        const id = playlistIdFromUrl(p.url) || '';
+        const cover = p.thumbnail || p.thumbnailUrl || '';
+        const title = p.name || p.title || '';
+        return `
+          <button class="it-tile it-tile-pl" data-playlist="${escapeHtml(id)}" data-name="${escapeHtml(title)}">
+            ${cover
+              ? `<img class="it-tile-cover" src="${escapeHtml(cover)}" alt="" referrerpolicy="no-referrer" loading="lazy">`
+              : `<div class="it-tile-cover it-tile-blank">♫</div>`}
+            <div class="it-tile-title">${escapeHtml(title)}</div>
+            <div class="it-tile-sub">${escapeHtml(p.uploaderName || 'Playlist')}</div>
+          </button>`;
+      }
+      function trackRowHTML(t, i, isCurrent) {
+        const dur = formatDuration(t.duration || 0);
+        return `
+          <div class="it-row${isCurrent ? ' is-current' : ''}" data-row="${i}">
+            <div class="it-row-num">${i + 1}</div>
+            <div class="it-row-cover">
+              ${t.cover
+                ? `<img src="${escapeHtml(t.cover)}" alt="" referrerpolicy="no-referrer" loading="lazy">`
+                : '♪'}
+            </div>
+            <div class="it-row-meta">
+              <div class="it-row-title">${escapeHtml(t.title || '')}</div>
+              <div class="it-row-artist">${escapeHtml(t.artist || '')}</div>
+            </div>
+            <div class="it-row-dur">${dur}</div>
+            <button class="it-row-play" data-act="row-play" title="Play">▶</button>
+          </div>`;
+      }
+
+      function bindTrackTiles(items) {
+        stageEl.querySelectorAll('[data-track]').forEach((btn, i) => {
+          btn.addEventListener('click', () => {
+            const tracks = items.map(trackFromPipedItem).filter(Boolean);
+            const t = trackFromPipedItem(items[i]);
+            if (t) MusicPlayer.playQueue(tracks, tracks.indexOf(t));
+          });
+        });
+      }
+      function bindPlaylistTiles(items) {
+        stageEl.querySelectorAll('[data-playlist]').forEach((btn) => {
+          btn.addEventListener('click', () => showPlaylist(btn.dataset.playlist, btn.dataset.name));
+        });
+      }
+      function bindTrackRows() {
+        // For library/queue view — just play the row's index in the current queue.
+        stageEl.querySelectorAll('[data-row]').forEach((row) => {
+          row.addEventListener('click', () => {
+            const idx = parseInt(row.dataset.row, 10);
+            const state = MusicPlayer.getState();
+            if (state.queue[idx]) MusicPlayer.playQueue(state.queue, idx);
+          });
+        });
+      }
+      function bindTrackRowsWithList(items) {
+        const tracks = items.map(trackFromPipedItem).filter(Boolean);
+        stageEl.querySelectorAll('[data-row]').forEach((row) => {
+          row.addEventListener('click', () => {
+            const idx = parseInt(row.dataset.row, 10);
+            if (tracks[idx]) MusicPlayer.playQueue(tracks, idx);
+          });
+        });
+      }
+      function bindTrackRowsExplicit(tracks) {
+        stageEl.querySelectorAll('[data-row]').forEach((row) => {
+          row.addEventListener('click', () => {
+            const idx = parseInt(row.dataset.row, 10);
+            if (tracks[idx]) MusicPlayer.playQueue(tracks, idx);
+          });
+        });
+      }
+
+      // ---------- Now-playing bar ----------
+      function nowPlayingHTML(state) {
+        const t = state.track;
+        const playGlyph = state.isPlaying ? '⏸' : '▶';
+        const repeatGlyph = state.repeat === 'one' ? '🔂' : '🔁';
+        return `
+          <div class="it-now-track">
+            ${t && t.cover
+              ? `<img class="it-now-cover" src="${escapeHtml(t.cover)}" alt="" referrerpolicy="no-referrer">`
+              : `<div class="it-now-cover it-now-blank">♪</div>`}
+            <div class="it-now-meta">
+              <div class="it-now-title">${escapeHtml(t?.title || 'Nothing playing')}</div>
+              <div class="it-now-artist">${escapeHtml(t?.artist || '')}</div>
+            </div>
+          </div>
+          <div class="it-now-controls">
+            <div class="it-now-buttons">
+              <button class="it-tx ${state.shuffle ? 'is-on' : ''}" data-act="shuffle" title="Shuffle">🔀</button>
+              <button class="it-tx" data-act="prev" title="Previous">⏮</button>
+              <button class="it-tx it-tx-play" data-act="toggle" title="Play/Pause">${playGlyph}</button>
+              <button class="it-tx" data-act="next" title="Next">⏭</button>
+              <button class="it-tx ${state.repeat !== 'off' ? 'is-on' : ''}" data-act="repeat" title="Repeat: ${state.repeat}">${repeatGlyph}</button>
+            </div>
+            <div class="it-now-progress">
+              <span class="it-now-time">${formatDuration(state.time)}</span>
+              <div class="it-now-bar" data-act="seek">
+                <div class="it-now-bar-fill" style="width:${state.duration ? (state.time / state.duration * 100) : 0}%"></div>
+              </div>
+              <span class="it-now-time">${formatDuration(state.duration)}</span>
+            </div>
+          </div>
+          <div class="it-now-extras">
+            <span class="it-now-vol">🔊</span>
+            <input class="it-now-vol-slider" type="range" min="0" max="100"
+                   value="${Math.round(state.volume * 100)}" data-act="volume"
+                   title="Volume">
+          </div>`;
+      }
+
+      function renderNowPlaying(state) {
+        // Avoid full innerHTML replace mid-drag on the seek bar; only update
+        // pieces that change frequently (time, fill width, button glyph).
+        const existing = nowEl.querySelector('.it-now-bar-fill');
+        if (existing && nowEl.children.length) {
+          const fill = nowEl.querySelector('.it-now-bar-fill');
+          if (fill && state.duration) fill.style.width = (state.time / state.duration * 100) + '%';
+          const times = nowEl.querySelectorAll('.it-now-time');
+          if (times[0]) times[0].textContent = formatDuration(state.time);
+          if (times[1]) times[1].textContent = formatDuration(state.duration);
+          const playBtn = nowEl.querySelector('[data-act="toggle"]');
+          if (playBtn) playBtn.textContent = state.isPlaying ? '⏸' : '▶';
+          const t = state.track;
+          const titleEl = nowEl.querySelector('.it-now-title');
+          const artistEl = nowEl.querySelector('.it-now-artist');
+          const coverEl = nowEl.querySelector('.it-now-cover');
+          if (titleEl) titleEl.textContent = t?.title || 'Nothing playing';
+          if (artistEl) artistEl.textContent = t?.artist || '';
+          if (t?.cover && coverEl) {
+            if (coverEl.tagName === 'IMG') coverEl.src = t.cover;
+            else coverEl.outerHTML = `<img class="it-now-cover" src="${escapeHtml(t.cover)}" alt="" referrerpolicy="no-referrer">`;
+          }
+          const shuffleBtn = nowEl.querySelector('[data-act="shuffle"]');
+          if (shuffleBtn) shuffleBtn.classList.toggle('is-on', state.shuffle);
+          const repeatBtn = nowEl.querySelector('[data-act="repeat"]');
+          if (repeatBtn) {
+            repeatBtn.textContent = state.repeat === 'one' ? '🔂' : '🔁';
+            repeatBtn.classList.toggle('is-on', state.repeat !== 'off');
+            repeatBtn.title = `Repeat: ${state.repeat}`;
+          }
+        } else {
+          nowEl.innerHTML = nowPlayingHTML(state);
+        }
+      }
+
+      // Subscribe to global player. Auto-cleans when this app unmounts
+      // (the listener throws when nowEl is detached and music.js drops it).
+      const unsubscribe = MusicPlayer.subscribe((state) => {
+        if (!nowEl.isConnected) {
+          unsubscribe();
+          throw new Error('detached');
+        }
+        renderNowPlaying(state);
+      });
+
+      // Now-playing transport buttons + seek/volume.
+      nowEl.addEventListener('click', (e) => {
+        const t = e.target.closest('[data-act]');
+        if (!t) return;
+        const act = t.dataset.act;
+        if (act === 'toggle') MusicPlayer.toggle();
+        else if (act === 'next') MusicPlayer.next();
+        else if (act === 'prev') MusicPlayer.prev();
+        else if (act === 'shuffle') MusicPlayer.setShuffle(!MusicPlayer.getState().shuffle);
+        else if (act === 'repeat') MusicPlayer.cycleRepeat();
+        else if (act === 'seek') {
+          const bar = e.currentTarget.querySelector('.it-now-bar');
+          if (!bar) return;
+          const rect = bar.getBoundingClientRect();
+          const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+          const dur = MusicPlayer.getState().duration;
+          if (dur) MusicPlayer.seek(pct * dur);
+        }
+      });
+      nowEl.addEventListener('input', (e) => {
+        if (e.target.dataset?.act === 'volume') {
+          MusicPlayer.setVolume(parseInt(e.target.value, 10) / 100);
+        }
+      });
+
+      // Cmd/Ctrl+K → search; Space → play/pause (when not focused on input).
+      root.addEventListener('keydown', (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+          e.preventDefault();
+          searchEl.focus();
+          searchEl.select();
+        } else if (e.key === ' ' && document.activeElement !== searchEl) {
+          e.preventDefault();
+          MusicPlayer.toggle();
+        }
+      });
+
+      // Kick off
+      showHome();
+    },
+  });
+
+  function formatDuration(s) {
+    s = Math.max(0, Math.floor(s || 0));
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec < 10 ? '0' + sec : sec}`;
+  }
 
   // ---------- About ----------
   OS.registerApp('about', {
