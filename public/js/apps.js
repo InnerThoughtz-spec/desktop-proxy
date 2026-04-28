@@ -1888,15 +1888,80 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         });
       }
 
-      function renderPlayer(title, subtitle, url) {
+      // ---------- Embed providers ----------
+      // Vidking's underlying CDN sources go up and down constantly, and
+      // some hosts (fly.io's IP ranges in particular) get blocked from
+      // their player by referrer/CORS checks. Offering several embed
+      // providers lets the user flip to whichever one currently has a
+      // working source for the title they're trying to watch.
+      const MOVIE_PROVIDERS = [
+        {
+          id: 'vidking', label: 'VidKing',
+          movie: (id)        => `https://www.vidking.net/embed/movie/${id}`,
+          tv:    (id, s, e)  => `https://www.vidking.net/embed/tv/${id}/${s}/${e}`,
+        },
+        {
+          id: 'vidsrc-su', label: 'VidSrc.su',
+          movie: (id)        => `https://vidsrc.su/embed/movie/${id}`,
+          tv:    (id, s, e)  => `https://vidsrc.su/embed/tv/${id}/${s}/${e}`,
+        },
+        {
+          id: 'vidsrc-cc', label: 'VidSrc.cc',
+          movie: (id)        => `https://vidsrc.cc/v2/embed/movie/${id}?autoPlay=false`,
+          tv:    (id, s, e)  => `https://vidsrc.cc/v2/embed/tv/${id}/${s}/${e}?autoPlay=false`,
+        },
+        {
+          id: 'vidlink', label: 'VidLink',
+          movie: (id)        => `https://vidlink.pro/movie/${id}`,
+          tv:    (id, s, e)  => `https://vidlink.pro/tv/${id}/${s}/${e}`,
+        },
+        {
+          id: 'autoembed', label: 'AutoEmbed',
+          movie: (id)        => `https://player.autoembed.cc/embed/movie/${id}`,
+          tv:    (id, s, e)  => `https://player.autoembed.cc/embed/tv/${id}/${s}/${e}`,
+        },
+        {
+          id: '2embed', label: '2Embed',
+          movie: (id)        => `https://www.2embed.cc/embed/${id}`,
+          tv:    (id, s, e)  => `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}`,
+        },
+      ];
+      const PROVIDER_KEY = 'inner.movies.provider';
+      function getProvider() {
+        try {
+          const id = localStorage.getItem(PROVIDER_KEY);
+          return MOVIE_PROVIDERS.find((p) => p.id === id) || MOVIE_PROVIDERS[0];
+        } catch { return MOVIE_PROVIDERS[0]; }
+      }
+      function setProvider(id) {
+        try { localStorage.setItem(PROVIDER_KEY, id); } catch {}
+      }
+
+      function renderPlayer(title, subtitle, type, params) {
         currentView = 'player';
         backBtn.hidden = false;
+        // urlFor builds the right embed URL for the current provider;
+        // call it again whenever the provider dropdown changes so we can
+        // hot-swap servers without leaving the player view.
+        const urlFor = (provider) => type === 'movie'
+          ? provider.movie(encodeURIComponent(params.id))
+          : provider.tv(encodeURIComponent(params.tvId),
+                        encodeURIComponent(params.season),
+                        encodeURIComponent(params.ep));
+        let provider = getProvider();
+        const url = urlFor(provider);
+
         stageEl.innerHTML = `
           <div class="is-player">
             <div class="is-player-bar">
               <div class="is-player-title">${escapeHtml(title)}</div>
               <div class="is-player-source">${escapeHtml(subtitle)}</div>
               <div style="flex:1"></div>
+              <select class="is-player-server" data-act="provider" title="Streaming server (try another if the current one fails)">
+                ${MOVIE_PROVIDERS.map((p) =>
+                  `<option value="${p.id}"${p.id === provider.id ? ' selected' : ''}>${escapeHtml(p.label)}</option>`
+                ).join('')}
+              </select>
               <button class="is-iconbtn" data-act="player-fs" title="Fullscreen (Esc twice to exit)">⛶</button>
               <button class="is-iconbtn" data-act="player-min" title="Minimize">—</button>
               <button class="is-iconbtn" data-act="player-close" title="Close">✕</button>
@@ -1917,20 +1982,26 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           const iframe = stageEl.querySelector('.is-player-frame');
           if (iframe && OS.enterGameFullscreen) OS.enterGameFullscreen(iframe);
         });
+        stageEl.querySelector('[data-act="provider"]')?.addEventListener('change', (e) => {
+          const next = MOVIE_PROVIDERS.find((p) => p.id === e.target.value);
+          if (!next) return;
+          setProvider(next.id);
+          provider = next;
+          const iframe = stageEl.querySelector('.is-player-frame');
+          if (iframe) iframe.src = urlFor(next);
+        });
       }
 
       function playMovie(id) {
         const item = (cache[`/api/cinema/details/movie/${id}`]) || null;
         const title = item?.title || 'Movie';
         const year = (item?.release_date || '').slice(0, 4);
-        renderPlayer(title, year ? `Movie · ${year}` : 'Movie',
-          `https://www.vidking.net/embed/movie/${encodeURIComponent(id)}`);
+        renderPlayer(title, year ? `Movie · ${year}` : 'Movie', 'movie', { id });
       }
       function playEpisode(tvId, season, ep) {
         const item = (cache[`/api/cinema/details/tv/${tvId}`]) || null;
         const title = item?.name || 'TV';
-        renderPlayer(title, `S${season} · E${ep}`,
-          `https://www.vidking.net/embed/tv/${encodeURIComponent(tvId)}/${encodeURIComponent(season)}/${encodeURIComponent(ep)}`);
+        renderPlayer(title, `S${season} · E${ep}`, 'tv', { tvId, season, ep });
       }
 
       // ---------- Search ----------

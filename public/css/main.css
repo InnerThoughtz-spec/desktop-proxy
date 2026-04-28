@@ -1397,6 +1397,24 @@ input, textarea { font: inherit; color: inherit; }
   border: 0;
   background: #000;
 }
+/* Server picker — vidking's underlying CDN sources die regularly so
+   the user needs a quick way to flip to a different embed provider. */
+.is-player-server {
+  padding: 6px 10px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 6px;
+  color: #fff;
+  font: inherit; font-size: 12.5px;
+  outline: none;
+  cursor: pointer;
+}
+.is-player-server:focus,
+.is-player-server:hover {
+  border-color: rgba(125,249,255,.55);
+  background: rgba(255,255,255,.10);
+}
+.is-player-server option { background: #11151c; color: #fff; }
 
 /* ---- Responsive ---- */
 @media (max-width: 760px) {
