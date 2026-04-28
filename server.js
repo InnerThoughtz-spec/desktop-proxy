@@ -331,12 +331,29 @@ function getYT() {
   return ytPromise;
 }
 
-// Pre-warm at server start so the first user request doesn't pay the
-// 5-15 second cold-start cost. Crucial on Codespaces where the network
-// path to youtube.com is slower than a typical residential ISP and the
-// browser audio element will stall while we initialize.
-process.nextTick(() => {
-  getYT().catch(() => { /* logged inside getYT */ });
+// Optional pre-warm. Disabled by default because youtubei.js loads the
+// YouTube player script (a few MB of JS) and evaluates it in a vm
+// context — on small fly.io machines (256 MB shared) with a 200 MB
+// heap cap, that can OOM the process at boot before /healthz is
+// reachable, putting the app into a restart loop.
+// Set MUSIC_PREWARM=1 in env to opt back in (recommended once you're
+// on a 512 MB+ machine).
+if (process.env.MUSIC_PREWARM === '1') {
+  setTimeout(() => {
+    getYT().catch(() => { /* logged inside getYT */ });
+  }, 1000);
+}
+
+// Belt-and-suspenders: no matter what goes wrong inside youtubei.js
+// or any other lazy-loaded module, keep the HTTP server alive. The
+// per-endpoint try/catch already returns a 502 to the client; this
+// catches the cases that escape that net (e.g. a timer callback
+// inside youtubei.js throwing on its own schedule).
+process.on('uncaughtException', (e) => {
+  console.error('[server] uncaughtException:', e.stack || e.message);
+});
+process.on('unhandledRejection', (e) => {
+  console.error('[server] unhandledRejection:', e?.stack || e?.message || e);
 });
 
 // Diagnostic endpoint — pinpoints which leg of the music chain is
