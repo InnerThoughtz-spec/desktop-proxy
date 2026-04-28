@@ -316,25 +316,36 @@ const vm = require('node:vm');
 let ytPromise = null;
 let ytInitTs = 0;
 let ytInitError = null;
+const YT_INIT_TIMEOUT = parseInt(process.env.MUSIC_INIT_TIMEOUT || '25000', 10);
 function getYT() {
   if (ytPromise) return ytPromise;
   ytInitError = null;
   const t0 = Date.now();
-  ytPromise = (async () => {
-    const yt = require('youtubei.js');
-    const { Innertube, Platform } = yt;
-    Platform.shim.eval = (data, env = {}) => {
-      const ctx = { ...env, console, URL };
-      vm.createContext(ctx);
-      return vm.runInContext('(function() { ' + data.output + ' })()', ctx, {
-        timeout: 5000,
-      });
-    };
-    const inst = await Innertube.create({ retrieve_player: true });
-    ytInitTs = Date.now();
-    console.log(`[music] youtubei.js ready in ${ytInitTs - t0}ms`);
-    return inst;
-  })().catch((e) => {
+  // Race the real init with a hard timeout. On 256MB fly machines the
+  // YouTube player.js download + parse can hang or OOM — without the
+  // race, Innertube.create() never resolves and every music endpoint
+  // sits forever waiting (which is what "the page doesn't open" looks
+  // like in the browser).
+  ytPromise = Promise.race([
+    (async () => {
+      const yt = require('youtubei.js');
+      const { Innertube, Platform } = yt;
+      Platform.shim.eval = (data, env = {}) => {
+        const ctx = { ...env, console, URL };
+        vm.createContext(ctx);
+        return vm.runInContext('(function() { ' + data.output + ' })()', ctx, {
+          timeout: 5000,
+        });
+      };
+      const inst = await Innertube.create({ retrieve_player: true });
+      ytInitTs = Date.now();
+      console.log(`[music] youtubei.js ready in ${ytInitTs - t0}ms`);
+      return inst;
+    })(),
+    new Promise((_, rej) => setTimeout(() => {
+      rej(new Error(`youtubei.js init timed out after ${YT_INIT_TIMEOUT}ms — likely OOM on a 256MB machine or YouTube blocking this host's IP. Bump memory or set MUSIC_INIT_TIMEOUT=60000.`));
+    }, YT_INIT_TIMEOUT)),
+  ]).catch((e) => {
     ytInitError = e;
     console.error(`[music] youtubei.js init failed:`, e.message);
     ytPromise = null;
