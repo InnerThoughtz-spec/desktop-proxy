@@ -1282,10 +1282,11 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       <div class="about">
         <div class="logo"></div>
         <dl>
-          <dt>Name</dt><dd>Desktop</dd>
+          <dt>Name</dt><dd>Inner-OS</dd>
           <dt>Build</dt><dd>0.3 · dev</dd>
-          <dt>Proxy</dt><dd>Ultraviolet</dd>
+          <dt>Proxy</dt><dd>Ultraviolet · Scramjet</dd>
           <dt>Runtime</dt><dd>Node · Express · bare-server-node</dd>
+          <dt>Made by</dt><dd><b>Makar Makarov</b></dd>
         </dl>
         <p style="color: var(--fg-dim); font-size: 12px; margin: 8px 0 0;">
           Desktop-OS pattern with customizable window manager, lockscreen, animated wallpapers (local, URL, or server-shared), and bring-your-own-logo shortcuts.
