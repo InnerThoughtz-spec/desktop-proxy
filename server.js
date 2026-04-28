@@ -550,17 +550,24 @@ app.get('/api/music/track/:id', async (req, res) => {
       return res.json(cached);
     }
     const yt = await getYT();
-    const info = await yt.music.getInfo(id);
+    // Use the ANDROID_VR client for metadata too. yt.music.getInfo (the
+    // WEB_REMIX path) often comes back with empty streaming_data on
+    // cloud IPs (Oracle/Fly/etc.) — YouTube's bot detection serves a
+    // metadata-only response. ANDROID_VR doesn't get hit by that. The
+    // client doesn't actually use the deciphered URLs anymore (it
+    // streams via /api/music/stream/:id which also uses ANDROID_VR);
+    // we just need the title/artist/cover/duration to be populated.
+    const info = await yt.getInfo(id, { client: 'ANDROID_VR' });
     const formats = (info.streaming_data?.adaptive_formats || [])
       .filter((f) => f.has_audio && !f.has_video)
       .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-    if (!formats.length) {
-      return res.status(404).json({ error: 'no_audio_streams' });
-    }
+    // No early-return on empty formats — we still want to surface
+    // metadata so the now-playing bar populates while the stream
+    // proxy figures itself out separately.
     const audioStreams = [];
     for (const f of formats) {
       try {
-        const url = await f.decipher(yt.session.player);
+        const url = f.url || await f.decipher(yt.session.player);
         audioStreams.push({
           url,
           mimeType: f.mime_type,
@@ -570,10 +577,10 @@ app.get('/api/music/track/:id', async (req, res) => {
       } catch { /* skip bad format */ }
     }
     const body = {
-      title: info.basic_info.title,
-      uploader: info.basic_info.author,
-      duration: info.basic_info.duration,
-      thumbnailUrl: info.basic_info.thumbnail?.[0]?.url || '',
+      title: info.basic_info?.title || '',
+      uploader: info.basic_info?.author || '',
+      duration: info.basic_info?.duration || 0,
+      thumbnailUrl: info.basic_info?.thumbnail?.[0]?.url || '',
       audioStreams,
     };
     cacheSet(`track:${id}`, body);
