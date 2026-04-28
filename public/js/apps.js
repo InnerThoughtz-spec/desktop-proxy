@@ -16,8 +16,11 @@
       // InnerMovies: rounded screen frame with a tiny "i" (dot+stem) on the
       // left and a filled play triangle on the right. Reads as "i ▶".
       movies: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="8" cy="8.6" r=".7" fill="currentColor" stroke="none"/><path d="M8 11v5.5"/><path d="M13 9.2l5.4 2.8L13 14.8z" fill="currentColor"/></svg>`,
-      // Inntify: musical eighth-note pair with filled noteheads + connecting beam.
-      music: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><circle cx="9" cy="17" r="2.5" fill="currentColor" stroke="none"/><circle cx="19" cy="14" r="2" fill="currentColor" stroke="none"/><path d="M9 14.5V5l12-2v9"/></svg>`,
+      // Inntify: classic Lucide-style music note. Two filled noteheads
+      // beamed by a stem that arcs across the top — perfectly centered in
+      // the 24×24 viewbox (note heads at x=6 and x=18, both r=3, stem
+      // running from x=9 to x=21 across the top).
+      music: `<svg viewBox="0 0 24 24" fill="none" ${stroke}><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3" fill="currentColor"/><circle cx="18" cy="16" r="3" fill="currentColor"/></svg>`,
       // InnerArcade: gamepad controller — body with shoulder buttons, d-pad
       // on the left, four face buttons on the right. Sized to fill the icon
       // viewbox (top of shoulder triggers at y=5, bottom of grips at y=18).
@@ -2815,6 +2818,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       let lastIsPlaying = null;
       let lastShuffle = null;
       let lastRepeat = null;
+      let lastError = null;
 
       function buildNowRefs() {
         const times = nowEl.querySelectorAll('.it-now-time');
@@ -2882,12 +2886,28 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           lastRepeat = state.repeat;
         }
 
+        // Error surface — overrides the artist line when present, so the
+        // user can tell a "music not playing" symptom apart from
+        // "googlevideo is unreachable from this Codespace's network."
+        if (state.error !== lastError) {
+          lastError = state.error;
+          if (r.artistEl) {
+            if (state.error) {
+              r.artistEl.textContent = `⚠ ${state.error}`;
+              r.artistEl.style.color = '#ff8a8a';
+            } else {
+              r.artistEl.textContent = t?.artist || '';
+              r.artistEl.style.color = '';
+            }
+          }
+        }
+
         // Track-change-only updates: cover/title/artist.
         const trackId = t?.id || null;
         if (trackId !== lastTrackId) {
           lastTrackId = trackId;
           if (r.titleEl) r.titleEl.textContent = t?.title || 'Nothing playing';
-          if (r.artistEl) r.artistEl.textContent = t?.artist || '';
+          if (r.artistEl && !state.error) r.artistEl.textContent = t?.artist || '';
           // Cover swap: only replace the element when img↔div needs to flip.
           const wantImg = !!t?.cover;
           const isImg = r.coverEl?.tagName === 'IMG';

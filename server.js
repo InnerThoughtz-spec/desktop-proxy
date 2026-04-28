@@ -302,8 +302,12 @@ async function buildArcadeManifest() {
 // uses `return`, so we wrap it in an IIFE.
 const vm = require('node:vm');
 let ytPromise = null;
+let ytInitTs = 0;
+let ytInitError = null;
 function getYT() {
   if (ytPromise) return ytPromise;
+  ytInitError = null;
+  const t0 = Date.now();
   ytPromise = (async () => {
     const yt = require('youtubei.js');
     const { Innertube, Platform } = yt;
@@ -314,13 +318,61 @@ function getYT() {
         timeout: 5000,
       });
     };
-    return await Innertube.create({ retrieve_player: true });
+    const inst = await Innertube.create({ retrieve_player: true });
+    ytInitTs = Date.now();
+    console.log(`[music] youtubei.js ready in ${ytInitTs - t0}ms`);
+    return inst;
   })().catch((e) => {
+    ytInitError = e;
+    console.error(`[music] youtubei.js init failed:`, e.message);
     ytPromise = null;
     throw e;
   });
   return ytPromise;
 }
+
+// Pre-warm at server start so the first user request doesn't pay the
+// 5-15 second cold-start cost. Crucial on Codespaces where the network
+// path to youtube.com is slower than a typical residential ISP and the
+// browser audio element will stall while we initialize.
+process.nextTick(() => {
+  getYT().catch(() => { /* logged inside getYT */ });
+});
+
+// Diagnostic endpoint — pinpoints which leg of the music chain is
+// broken when "music doesn't work" (e.g. on Codespaces). Hit
+// /api/music/status from the browser to see what the server can reach.
+app.get('/api/music/status', async (_req, res) => {
+  const out = {
+    youtubei: {
+      ready: !!ytInitTs && !ytInitError,
+      lastError: ytInitError?.message || null,
+      readyAt: ytInitTs || null,
+    },
+    cache: { entries: musicCache.size },
+    streamCache: { entries: typeof streamUrlCache !== 'undefined' ? streamUrlCache.size : 0 },
+  };
+  // Active probe: try a known-good ID end-to-end with short timeouts.
+  if (_req.query.probe === '1') {
+    try {
+      const id = 'J7p4bzqLvCw'; // Blinding Lights
+      const yt = await getYT();
+      const info = await yt.getInfo(id, { client: 'ANDROID_VR' });
+      const fmt = (info.streaming_data?.adaptive_formats || [])
+        .filter((f) => f.has_audio && !f.has_video)
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+      const url = fmt?.url || (fmt && await fmt.decipher(yt.session.player));
+      const r = await fetch(url, {
+        headers: { range: 'bytes=0-1023', origin: 'https://www.youtube.com', 'user-agent': 'Mozilla/5.0' },
+        signal: AbortSignal.timeout(8000),
+      });
+      out.probe = { ok: r.ok || r.status === 206, status: r.status };
+    } catch (e) {
+      out.probe = { ok: false, error: e.message };
+    }
+  }
+  res.json(out);
+});
 
 const MUSIC_TTL = 5 * 60 * 1000;
 const musicCache = new Map();

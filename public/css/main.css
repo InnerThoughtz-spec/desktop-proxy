@@ -305,16 +305,27 @@ input, textarea { font: inherit; color: inherit; }
 .dock-btn:hover { background: var(--panel-hi); }
 .dock-btn:active { transform: translateY(1px) scale(0.97); }
 .dock-start .start-glyph {
-  width: 22px; height: 22px; border-radius: 6px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: inset 0 0 0 2px rgba(255,255,255,0.15);
+  width: 22px; height: 22px;
   display: inline-block;
   position: relative;
+  /* Solid-white 2×2 windowed-grid glyph (the "older" version the user
+     wanted back). The gradient/blue version was getting auto-swapped to
+     a colored emoji on some browsers — keeping this as pure CSS shapes
+     guarantees it stays monochrome. */
 }
-.dock-start .start-glyph::before, .dock-start .start-glyph::after {
-  content: ""; position: absolute; background: rgba(255,255,255,0.6); border-radius: 1.5px;
+.dock-start .start-glyph::before,
+.dock-start .start-glyph::after {
+  content: ""; position: absolute; background: #fff; border-radius: 2px;
 }
-.dock-start .start-glyph::before { left: 4px; top: 4px; width: 5px; height: 5px; box-shadow: 9px 0 0 rgba(255,255,255,0.6), 0 9px 0 rgba(255,255,255,0.6), 9px 9px 0 rgba(255,255,255,0.6); }
+/* Top-left dot + three companions via box-shadow (top-right, bottom-left,
+   bottom-right). One pseudo-element draws four squares for free. */
+.dock-start .start-glyph::before {
+  left: 3px; top: 3px; width: 7px; height: 7px;
+  box-shadow:
+    9px 0 0 #fff,
+    0 9px 0 #fff,
+    9px 9px 0 #fff;
+}
 .dock-start .start-glyph::after { display: none; }
 
 .grid-glyph {

@@ -88,10 +88,12 @@
    * If a newer load() is fired before this resolves, the older one bails
    * (loadToken bookkeeping) so quick next-clicks don't overwrite each other.
    */
+  let lastError = null;
   async function loadTrack(track) {
     if (!track || !track.id) return;
     const a = getAudio();
     const myToken = ++loadToken;
+    lastError = null;
     a.removeAttribute('src');
     a.load();
     emit(); // show loading state immediately
@@ -100,7 +102,12 @@
       // cover/duration before the audio buffers in.
       const r = await fetch(`/api/music/track/${encodeURIComponent(track.id)}`);
       if (myToken !== loadToken) return; // user clicked something else
-      if (!r.ok) throw new Error(`track HTTP ${r.status}`);
+      if (!r.ok) {
+        // Surface the server's JSON error if there is one.
+        let detail = `HTTP ${r.status}`;
+        try { const j = await r.json(); if (j.detail || j.error) detail = j.detail || j.error; } catch {}
+        throw new Error(`metadata: ${detail}`);
+      }
       const data = await r.json();
       if (myToken !== loadToken) return;
       track.title = data.title || track.title;
@@ -111,6 +118,20 @@
       // so seeking works, refreshes the upstream URL on 403/410, and
       // adds the Origin/Referer that googlevideo requires.
       a.src = `/api/music/stream/${encodeURIComponent(track.id)}`;
+      // If the audio element fails to load the stream URL, surface it.
+      const onErr = () => {
+        if (myToken !== loadToken) return;
+        const code = a.error?.code;
+        const msg = code === 4 ? 'audio format not supported by browser'
+                  : code === 3 ? 'audio decode error'
+                  : code === 2 ? 'network error fetching audio'
+                  : 'audio failed to load';
+        lastError = msg;
+        console.warn('[Inntify] audio error:', msg, 'url:', a.src);
+        emit();
+        a.removeEventListener('error', onErr);
+      };
+      a.addEventListener('error', onErr);
       try { await a.play(); } catch (e) {
         // Autoplay may be blocked until first user gesture; expose state
         // anyway so the UI can show "click to play".
@@ -119,6 +140,7 @@
       emit();
     } catch (e) {
       if (myToken !== loadToken) return;
+      lastError = e.message || String(e);
       console.error('[Inntify] loadTrack failed:', e);
       emit();
     }
@@ -285,6 +307,7 @@
       muted: !!a?.muted,
       shuffle,
       repeat,
+      error: lastError,
     };
   }
 
