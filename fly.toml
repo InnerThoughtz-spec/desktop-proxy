@@ -1,0 +1,73 @@
+# fly.toml — Inner-OS / desktop-proxy on fly.io
+#
+# One-time setup:
+#   fly launch --no-deploy        # picks up this config + Dockerfile
+#   fly volumes create wallpapers --size 1 --region iad   # 1 GB persistent disk
+#   fly deploy
+#
+# After that, redeploys are just `fly deploy`. The free allowance covers a
+# single shared-cpu-1x machine (256 MB) with a 1 GB volume + 160 GB egress
+# per month — enough for personal use.
+#
+# Change `app` to a name you own (must be globally unique on fly.io).
+# Change `primary_region` to the city closest to you — list at
+# https://fly.io/docs/reference/regions/. `iad` is Washington DC.
+app = "inner-os"
+primary_region = "iad"
+
+[build]
+  # Fly picks up the existing multi-stage Dockerfile in the repo root.
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "8080"
+  # Inntify backend setting — fly's ipv6 fetch usually wins, but you can
+  # pin a self-hosted Piped here if you want to skip the youtubei.js
+  # cold-start. Left empty so server.js uses the youtubei.js path.
+  # PIPED_API = ""
+  # NODE_OPTIONS limits heap so we don't OOM the 256MB free machine.
+  NODE_OPTIONS = "--max-old-space-size=200"
+
+# 256 MB shared-cpu-1x is the free-tier shape. Bump `memory` to "512mb" or
+# "1gb" if you upgrade — larger machines start charging.
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"
+  cpus = 1
+  cpu_kind = "shared"
+
+# Uploaded wallpapers + the manifest live here so they survive redeploys.
+# server.js reads DATA_DIR or falls back to ./data; we point it at the
+# mounted volume.
+[[mounts]]
+  source = "wallpapers"
+  destination = "/data"
+
+[env.DATA_DIR]
+  # Override the in-repo ./data path with the persistent mount.
+  # (The DATA_DIR variable is read on boot; see server.js line 11.)
+  value = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # auto_stop = "off" keeps the machine running 24/7. Without this, fly
+  # idles unused machines after a few minutes — the user explicitly
+  # asked for "doesn't go offline."
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  # /healthz returns {ok:true} from server.js. Fly hits this every 30s.
+  [[http_service.checks]]
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "10s"
+    method = "get"
+    path = "/healthz"
+
+# Note on bare-server-node WebSockets: fly's HTTP/1.1 + WS upgrade works
+# transparently through http_service — nothing extra to configure. The
+# UV/Scramjet engines connect over /bare/ via wss:// once the page is
+# served over https://.

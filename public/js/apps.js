@@ -1626,7 +1626,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
             <div class="is-splash-tag">your private cinema</div>
           </div>
           <div class="is-main" data-role="main" hidden>
-            <div class="is-topbar">
+            <div class="is-topbar" data-drag-handle>
               <button class="is-iconbtn" data-act="back" hidden title="Back">‹</button>
               <div class="is-wordmark">Inner<b>Movies</b></div>
               <div class="is-search">
@@ -2018,7 +2018,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
             <div class="is-splash-tag">your private arcade</div>
           </div>
           <div class="is-main" data-role="main" hidden>
-            <div class="is-topbar">
+            <div class="is-topbar" data-drag-handle>
               <button class="is-iconbtn" data-act="back" hidden title="Back">‹</button>
               <div class="is-wordmark">Inner<b>Arcade</b></div>
               <div class="is-search">
@@ -2410,7 +2410,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
             <div class="is-splash-tag">your private soundstage</div>
           </div>
           <div class="is-main" data-role="main" hidden>
-            <div class="is-topbar">
+            <div class="is-topbar" data-drag-handle>
               <button class="is-iconbtn" data-act="back" hidden title="Back">‹</button>
               <div class="is-wordmark">Inn<b>tify</b></div>
               <div class="is-search">
@@ -2802,38 +2802,112 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           </div>`;
       }
 
+      // Cache: query the now-playing DOM nodes ONCE and update them in place
+      // on every state emit. The previous implementation did 6+ separate
+      // querySelector walks every ~250ms — measurable lag on Chromebooks.
+      // Also remember last values per field so we skip touching nodes whose
+      // value didn't change (avoids redundant style writes / text nodes).
+      let nowRefs = null;
+      let lastTrackId = null;
+      let lastTimeText = null;
+      let lastDurText = null;
+      let lastFillPct = null;
+      let lastIsPlaying = null;
+      let lastShuffle = null;
+      let lastRepeat = null;
+
+      function buildNowRefs() {
+        const times = nowEl.querySelectorAll('.it-now-time');
+        nowRefs = {
+          fill:       nowEl.querySelector('.it-now-bar-fill'),
+          timeStart:  times[0] || null,
+          timeEnd:    times[1] || null,
+          playBtn:    nowEl.querySelector('[data-act="toggle"]'),
+          titleEl:    nowEl.querySelector('.it-now-title'),
+          artistEl:   nowEl.querySelector('.it-now-artist'),
+          coverEl:    nowEl.querySelector('.it-now-cover'),
+          shuffleBtn: nowEl.querySelector('[data-act="shuffle"]'),
+          repeatBtn:  nowEl.querySelector('[data-act="repeat"]'),
+        };
+      }
+
       function renderNowPlaying(state) {
-        // Avoid full innerHTML replace mid-drag on the seek bar; only update
-        // pieces that change frequently (time, fill width, button glyph).
-        const existing = nowEl.querySelector('.it-now-bar-fill');
-        if (existing && nowEl.children.length) {
-          const fill = nowEl.querySelector('.it-now-bar-fill');
-          if (fill && state.duration) fill.style.width = (state.time / state.duration * 100) + '%';
-          const times = nowEl.querySelectorAll('.it-now-time');
-          if (times[0]) times[0].textContent = formatDuration(state.time);
-          if (times[1]) times[1].textContent = formatDuration(state.duration);
-          const playBtn = nowEl.querySelector('[data-act="toggle"]');
-          if (playBtn) playBtn.innerHTML = state.isPlaying ? SVG_ICONS.pause : SVG_ICONS.play;
-          const t = state.track;
-          const titleEl = nowEl.querySelector('.it-now-title');
-          const artistEl = nowEl.querySelector('.it-now-artist');
-          const coverEl = nowEl.querySelector('.it-now-cover');
-          if (titleEl) titleEl.textContent = t?.title || 'Nothing playing';
-          if (artistEl) artistEl.textContent = t?.artist || '';
-          if (t?.cover && coverEl) {
-            if (coverEl.tagName === 'IMG') coverEl.src = t.cover;
-            else coverEl.outerHTML = `<img class="it-now-cover" src="${escapeHtml(t.cover)}" alt="" referrerpolicy="no-referrer">`;
-          }
-          const shuffleBtn = nowEl.querySelector('[data-act="shuffle"]');
-          if (shuffleBtn) shuffleBtn.classList.toggle('is-on', state.shuffle);
-          const repeatBtn = nowEl.querySelector('[data-act="repeat"]');
-          if (repeatBtn) {
-            repeatBtn.innerHTML = state.repeat === 'one' ? SVG_ICONS.repeat1 : SVG_ICONS.repeat;
-            repeatBtn.classList.toggle('is-on', state.repeat !== 'off');
-            repeatBtn.title = `Repeat: ${state.repeat}`;
-          }
-        } else {
+        // First call (or after innerHTML was wiped): stamp + snapshot refs.
+        if (!nowRefs || !nowEl.querySelector('.it-now-bar-fill')) {
           nowEl.innerHTML = nowPlayingHTML(state);
+          buildNowRefs();
+          // Reset caches so the first real diff pass writes everything once.
+          lastTrackId = null;
+          lastTimeText = null;
+          lastDurText = null;
+          lastFillPct = null;
+          lastIsPlaying = null;
+          lastShuffle = null;
+          lastRepeat = null;
+        }
+        const r = nowRefs;
+        const t = state.track;
+
+        // Per-frame: progress bar + time texts (the only fast-moving bits).
+        if (r.fill && state.duration) {
+          const pct = (state.time / state.duration * 100);
+          // Skip writing style if the visible width wouldn't change anyway.
+          if (lastFillPct === null || Math.abs(pct - lastFillPct) > 0.2) {
+            r.fill.style.width = pct + '%';
+            lastFillPct = pct;
+          }
+        }
+        if (r.timeStart) {
+          const txt = formatDuration(state.time);
+          if (txt !== lastTimeText) { r.timeStart.textContent = txt; lastTimeText = txt; }
+        }
+        if (r.timeEnd) {
+          const txt = formatDuration(state.duration);
+          if (txt !== lastDurText) { r.timeEnd.textContent = txt; lastDurText = txt; }
+        }
+
+        // Play/pause glyph — repaint only on transition.
+        if (r.playBtn && state.isPlaying !== lastIsPlaying) {
+          r.playBtn.innerHTML = state.isPlaying ? SVG_ICONS.pause : SVG_ICONS.play;
+          lastIsPlaying = state.isPlaying;
+        }
+        if (r.shuffleBtn && state.shuffle !== lastShuffle) {
+          r.shuffleBtn.classList.toggle('is-on', state.shuffle);
+          lastShuffle = state.shuffle;
+        }
+        if (r.repeatBtn && state.repeat !== lastRepeat) {
+          r.repeatBtn.innerHTML = state.repeat === 'one' ? SVG_ICONS.repeat1 : SVG_ICONS.repeat;
+          r.repeatBtn.classList.toggle('is-on', state.repeat !== 'off');
+          r.repeatBtn.title = `Repeat: ${state.repeat}`;
+          lastRepeat = state.repeat;
+        }
+
+        // Track-change-only updates: cover/title/artist.
+        const trackId = t?.id || null;
+        if (trackId !== lastTrackId) {
+          lastTrackId = trackId;
+          if (r.titleEl) r.titleEl.textContent = t?.title || 'Nothing playing';
+          if (r.artistEl) r.artistEl.textContent = t?.artist || '';
+          // Cover swap: only replace the element when img↔div needs to flip.
+          const wantImg = !!t?.cover;
+          const isImg = r.coverEl?.tagName === 'IMG';
+          if (wantImg && !isImg && r.coverEl) {
+            const img = document.createElement('img');
+            img.className = 'it-now-cover';
+            img.src = t.cover;
+            img.referrerPolicy = 'no-referrer';
+            img.alt = '';
+            r.coverEl.replaceWith(img);
+            r.coverEl = img;
+          } else if (wantImg && isImg && r.coverEl.src !== t.cover) {
+            r.coverEl.src = t.cover;
+          } else if (!wantImg && isImg) {
+            const div = document.createElement('div');
+            div.className = 'it-now-cover it-now-blank';
+            div.textContent = '♪';
+            r.coverEl.replaceWith(div);
+            r.coverEl = div;
+          }
         }
       }
 

@@ -501,9 +501,15 @@
     el.querySelector('.win-max').addEventListener('click', (e) => { e.stopPropagation(); toggleMaxWindow(win); });
 
     const titlebar = el.querySelector('.win-titlebar');
-    titlebar.addEventListener('mousedown', (e) => {
-      if (e.target.closest('.win-actions')) return;
+    // Apps that mount a full-bleed UI (InnerMovies, InnerArcade, Inntify)
+    // cover the .win-titlebar. They mark their own header with
+    // [data-drag-handle] so it acts as a drag region too — without this,
+    // those windows can't be moved by the user.
+    function startDrag(e) {
+      if (e.target.closest('.win-actions, button, input, select, a, textarea, [data-no-drag]')) return;
       if (win.isMax) return;
+      // Only primary mouse button.
+      if (e.button !== undefined && e.button !== 0) return;
       const start = { x: e.clientX, y: e.clientY, bx: win.bounds.x, by: win.bounds.y };
       const move = (ev) => {
         win.bounds.x = Math.max(-40, start.bx + (ev.clientX - start.x));
@@ -518,8 +524,21 @@
       document.body.style.userSelect = 'none';
       window.addEventListener('mousemove', move);
       window.addEventListener('mouseup', up);
-    });
+    }
+    titlebar.addEventListener('mousedown', startDrag);
     titlebar.addEventListener('dblclick', () => toggleMaxWindow(win));
+    // Delegate to any element marked draggable inside the window body.
+    el.addEventListener('mousedown', (e) => {
+      if (!e.target.closest('[data-drag-handle]')) return;
+      // Don't double-fire if the click was already on the standard titlebar.
+      if (e.target.closest('.win-titlebar')) return;
+      startDrag(e);
+    });
+    el.addEventListener('dblclick', (e) => {
+      if (e.target.closest('[data-drag-handle]') && !e.target.closest('button, input, select')) {
+        toggleMaxWindow(win);
+      }
+    });
 
     const handles = el.querySelectorAll('.win-resize');
     handles.forEach((h) => {
@@ -855,10 +874,43 @@
     el.innerHTML = `<span class="t">${t}</span><span class="d">${dd}</span>`;
   }
 
+  // ---- Performance mode ----
+  // Cheap school Chromebooks (2GB RAM, dual-core Celeron) can't afford
+  // backdrop-filter blurs on every window + the looping splash glow
+  // animation + 6-layer text-shadows on neon letters. Detect them and
+  // strip the expensive effects via a CSS hook on <html>.
+  // Three modes:
+  //   'auto' (default) — sniff the device, pick lite or rich
+  //   'lite'           — force lite (user override)
+  //   'rich'           — force rich (user override)
+  function detectPerfMode() {
+    const setting = state.perfMode || 'auto';
+    if (setting === 'lite' || setting === 'rich') return setting;
+    const memory = navigator.deviceMemory || 8;       // Chromium only
+    const cores = navigator.hardwareConcurrency || 8;
+    const isCrOS = /CrOS/i.test(navigator.userAgent);
+    const reduced = matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    if (isCrOS || memory <= 2 || cores <= 2 || reduced) return 'lite';
+    return 'rich';
+  }
+  function applyPerfMode() {
+    const mode = detectPerfMode();
+    document.documentElement.dataset.perf = mode;
+    return mode;
+  }
+  function setPerfMode(mode) {
+    if (!['auto', 'lite', 'rich'].includes(mode)) return;
+    setState({ perfMode: mode });
+    applyPerfMode();
+  }
+
   // ---- FPS ----
   let fpsRaf = 0;
   function startFps() {
     if (fpsRaf) return;
+    // Skip the rAF loop entirely in lite mode — every frame of FPS
+    // measurement is wasted CPU on an already-stretched device.
+    if (document.documentElement.dataset.perf === 'lite') return;
     const el = document.querySelector('.fps .fps-n');
     let frames = 0, last = performance.now();
     const loop = (now) => {
@@ -881,6 +933,7 @@
 
   // ---- Boot ----
   function boot() {
+    applyPerfMode();
     applyTheme();
     applyWallpaper();
     setFpsVisible(state.fpsVisible !== false);
@@ -1026,18 +1079,44 @@
     iframe.parentNode.insertBefore(placeholder, iframe);
     content.innerHTML = '';
     content.appendChild(iframe);
+
+    // Add a visible "Exit" button — backup for users who don't know about
+    // Esc, and the only reliable exit if the browser blocks fullscreen
+    // re-entry on the first Esc.
+    let exitBtn = root.querySelector('.game-fs-exit');
+    if (!exitBtn) {
+      exitBtn = document.createElement('button');
+      exitBtn.className = 'game-fs-exit';
+      exitBtn.title = 'Exit fullscreen';
+      exitBtn.setAttribute('aria-label', 'Exit fullscreen');
+      exitBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+      root.appendChild(exitBtn);
+    }
+    exitBtn.onclick = () => cleanup();
+
     root.hidden = false;
+    showToast(`Press <kbd>Esc</kbd> twice to exit`, 2400);
 
-    // Initial hint that fades out after a couple seconds.
-    showToast(`Press <kbd>Esc</kbd> twice to exit`, 2200);
-
+    // ---- The bug: cross-origin iframes (vidking, gn-math) capture
+    // keydown events when focused, so a document-level keydown listener
+    // for Esc never fires once the user clicks into the game. The
+    // browser's Fullscreen API IS reliable here — Esc always exits
+    // browser fullscreen regardless of focus, and we get a
+    // `fullscreenchange` event we can intercept.
+    //
+    // First Esc: browser exits FS → fullscreenchange fires → we
+    // re-enter FS and arm the exit toast for 1.5s.
+    // Second Esc within window: same path, but escArmed=true so we
+    // actually clean up. After 1.5s with no second tap, the gesture
+    // resets and the next Esc triggers the toast again.
     let escArmed = false;
     let escTimer = null;
+    let userExited = false;
+    let listening = false;
 
     function showToast(text, dur) {
       toast.innerHTML = text;
       toast.hidden = false;
-      // Restart the CSS animation by toggling the class.
       toast.classList.remove('is-flash');
       void toast.offsetWidth;
       toast.classList.add('is-flash');
@@ -1045,15 +1124,61 @@
       toast._t = setTimeout(() => { toast.hidden = true; }, dur);
     }
 
+    // Best-effort browser fullscreen — falls back to CSS-only overlay.
+    const reqFS = () => {
+      const fn = root.requestFullscreen
+              || root.webkitRequestFullscreen
+              || root.mozRequestFullScreen
+              || root.msRequestFullscreen;
+      if (!fn) return Promise.reject(new Error('fullscreen unsupported'));
+      return fn.call(root).catch((e) => { throw e; });
+    };
+    const exitFS = () => {
+      const fn = document.exitFullscreen
+              || document.webkitExitFullscreen
+              || document.mozCancelFullScreen
+              || document.msExitFullscreen;
+      if (fn && fsElement()) try { fn.call(document); } catch {}
+    };
+    const fsElement = () => document.fullscreenElement
+                         || document.webkitFullscreenElement
+                         || document.mozFullScreenElement
+                         || document.msFullscreenElement
+                         || null;
+
+    reqFS().catch(() => { /* CSS overlay still covers everything */ });
+
+    function onFullscreenChange() {
+      if (fsElement() === root) return; // entering — ignore
+      // Exited fullscreen.
+      if (userExited) return;
+      if (escArmed) {
+        // Second Esc inside window — actually exit.
+        cleanup();
+        return;
+      }
+      // First Esc — arm and re-enter.
+      escArmed = true;
+      showToast(`Press <kbd>Esc</kbd> again to exit`, 1500);
+      if (escTimer) clearTimeout(escTimer);
+      escTimer = setTimeout(() => { escArmed = false; }, 1500);
+      reqFS().catch(() => {
+        // Re-entry was denied (browser policy or user interrupted) —
+        // honor the exit instead of trapping the user. This also
+        // handles the case where browser FS was never granted in the
+        // first place.
+        cleanup();
+      });
+    }
+
+    // Belt-and-suspenders: also listen for keydown when the parent
+    // document has focus (e.g. user hasn't clicked into the iframe yet).
     function onKey(e) {
       if (e.key !== 'Escape') return;
-      // Capture-phase + preventDefault so the iframe's own Esc handlers
-      // (some games use Esc as pause) don't compete with the exit gesture.
       e.preventDefault();
       e.stopPropagation();
-      if (escArmed) {
-        cleanup();
-      } else {
+      if (escArmed) cleanup();
+      else {
         escArmed = true;
         showToast(`Press <kbd>Esc</kbd> again to exit`, 1500);
         if (escTimer) clearTimeout(escTimer);
@@ -1062,10 +1187,18 @@
     }
 
     function cleanup() {
+      if (userExited) return;
+      userExited = true;
       if (escTimer) clearTimeout(escTimer);
       if (toast._t) clearTimeout(toast._t);
-      document.removeEventListener('keydown', onKey, true);
+      if (listening) {
+        document.removeEventListener('fullscreenchange', onFullscreenChange);
+        document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+        document.removeEventListener('keydown', onKey, true);
+        listening = false;
+      }
       toast.hidden = true;
+      exitFS();
       try { placeholder.parentNode.replaceChild(iframe, placeholder); }
       catch { /* iframe already detached */ }
       root.hidden = true;
@@ -1073,7 +1206,10 @@
       try { opts.onExit?.(); } catch {}
     }
 
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
     document.addEventListener('keydown', onKey, true);
+    listening = true;
     root._exit = cleanup;
     return cleanup;
   }
@@ -1087,6 +1223,8 @@
     togglePinned,
     showLock, unlock,
     setFpsVisible,
+    setPerfMode,
+    getPerfMode: () => document.documentElement.dataset.perf || 'rich',
     applyWallpaper,
     addShortcut, updateShortcut, removeShortcut, reloadShortcuts,
     addDesktopIcon, removeDesktopIcon, moveDesktopIcon, hasDesktopIcon: _hasDesktopIcon,

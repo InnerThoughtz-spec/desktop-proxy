@@ -42,7 +42,20 @@
       document.body.appendChild(audio);
     }
     audio.addEventListener('ended', onEnded);
-    audio.addEventListener('timeupdate', emit);
+    // timeupdate fires ~4 times/sec; that's a lot of DOM work over the
+    // life of a song on a slow Chromebook. Throttle progress emits to
+    // ~2Hz in rich mode and ~1Hz in lite — visually we only need the
+    // bar to advance every half-second or so. State-change events
+    // (play/pause/loadedmetadata/ended) still emit immediately so the
+    // play button glyph + duration update without lag.
+    let lastTimeEmit = 0;
+    audio.addEventListener('timeupdate', () => {
+      const now = performance.now();
+      const interval = document.documentElement.dataset.perf === 'lite' ? 950 : 480;
+      if (now - lastTimeEmit < interval) return;
+      lastTimeEmit = now;
+      emit();
+    });
     audio.addEventListener('play', emit);
     audio.addEventListener('pause', emit);
     audio.addEventListener('loadedmetadata', emit);

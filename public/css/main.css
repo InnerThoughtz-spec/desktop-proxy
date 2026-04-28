@@ -947,6 +947,66 @@ input, textarea { font: inherit; color: inherit; }
 }
 
 /* ===========================================================================
+   Lite mode — performance overrides for low-end devices (Chromebooks,
+   2GB-RAM laptops, anything that turns up via navigator.deviceMemory <= 2
+   or hardwareConcurrency <= 2 or `CrOS` in the UA). Toggleable in
+   Settings → Appearance → Performance. Goal: drop GPU-expensive effects
+   (backdrop blur, multi-layer text-shadow, looping animations) without
+   changing layout or visual structure.
+   =========================================================================== */
+:root[data-perf="lite"] {
+  /* Drop window/dock glass blur — cheapest single win on a slow GPU. */
+}
+:root[data-perf="lite"] .win,
+:root[data-perf="lite"] .dock,
+:root[data-perf="lite"] .start-menu,
+:root[data-perf="lite"] .ctx-menu,
+:root[data-perf="lite"] .lock,
+:root[data-perf="lite"] .it-now,
+:root[data-perf="lite"] .ia-player-bar,
+:root[data-perf="lite"] .is-player-bar,
+:root[data-perf="lite"] .wallpaper-dim {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+/* Use solid colors where transparency was the only reason for blur. */
+:root[data-perf="lite"] .win { background: #11151c; }
+:root[data-perf="lite"][data-theme="light"] .win { background: #f5f7fb; }
+:root[data-perf="lite"] .dock { background: rgba(7,9,13,.92); }
+:root[data-perf="lite"] .it-now { background: rgba(7,9,13,.94); }
+
+/* Splash: kill the looping pulse + collapse the 6-layer text-shadow to 2. */
+:root[data-perf="lite"] .is-splash-glow { animation: none !important; }
+:root[data-perf="lite"] .is-letter {
+  text-shadow: 0 0 8px #fff, 0 0 18px currentColor !important;
+  animation-duration: .4s !important;
+}
+/* Drop the per-letter flicker animation — it triggers paint repeatedly. */
+:root[data-perf="lite"] .is-letter {
+  animation: is-letter-rise .4s var(--ease) both !important;
+}
+
+/* Drop hover-lift transitions on cards (lots of cards × every hover) */
+:root[data-perf="lite"] .ia-card,
+:root[data-perf="lite"] .it-tile,
+:root[data-perf="lite"] .is-card,
+:root[data-perf="lite"] .game-fs-exit {
+  transition: none !important;
+}
+:root[data-perf="lite"] .ia-card:hover,
+:root[data-perf="lite"] .is-card:hover,
+:root[data-perf="lite"] .it-tile:hover {
+  transform: none !important;
+}
+
+/* Hide the FPS counter — JS also short-circuits the rAF loop in lite. */
+:root[data-perf="lite"] .fps { display: none !important; }
+
+/* Boot screen: stop the win-flash animation from looping. */
+:root[data-perf="lite"] .boot .win-logo i { animation-duration: .8s !important; }
+:root[data-perf="lite"] .boot-label { animation: none !important; opacity: .55; }
+
+/* ===========================================================================
    InnerStream — custom in-OS streaming app
    ===========================================================================
    Two-tone neon palette (cyan + magenta) reads as "screen glow". Splash
@@ -1584,6 +1644,30 @@ input, textarea { font: inherit; color: inherit; }
   color: #fff;
   vertical-align: 1px;
 }
+/* Backup exit button. Hidden by default; visible on mouse move at top-
+   right edge so it doesn't block immersion. Esc twice is the primary
+   exit; this is the safety net (and the only exit if the browser blocks
+   fullscreen re-entry on first Esc). */
+.game-fs-exit {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: rgba(15,17,22,.6);
+  border: 1px solid rgba(255,255,255,.12);
+  color: rgba(255,255,255,.85);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  z-index: 100002;
+  opacity: 0;
+  transition: opacity .25s var(--ease, cubic-bezier(.2,.8,.2,1)), background .12s var(--ease);
+}
+.game-fs-exit svg { width: 18px; height: 18px; display: block; }
+.game-fs-exit:hover { background: rgba(224,65,65,.85); color: #fff; opacity: 1; }
+/* Show on any mouse activity over the overlay. */
+.game-fs:hover .game-fs-exit { opacity: .65; }
 
 /* ===========================================================================
    Inntify — music app
