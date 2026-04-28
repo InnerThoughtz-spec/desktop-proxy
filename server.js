@@ -107,7 +107,20 @@ async function tmdb(pathAndQuery) {
   if (hit && (now - hit.ts) < TMDB_TTL) return hit.body;
   const sep = pathAndQuery.includes('?') ? '&' : '?';
   const url = `${TMDB_BASE}${pathAndQuery}${sep}api_key=${TMDB_API_KEY}`;
-  const r = await fetch(url, { headers: { 'accept': 'application/json' } });
+  // Hard 8s timeout so a slow TMDB response on fly.io's network doesn't
+  // tie up the request indefinitely — surfaces as a clean 502 the user
+  // can see + a logged error instead of a hung browser tab.
+  let r;
+  try {
+    r = await fetch(url, {
+      headers: { 'accept': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (e) {
+    const err = new Error(`tmdb fetch failed: ${e.name === 'TimeoutError' ? 'timeout after 8s' : e.message}`);
+    err.status = 504;
+    throw err;
+  }
   if (!r.ok) {
     const err = new Error(`tmdb ${r.status}`);
     err.status = r.status;
@@ -115,7 +128,6 @@ async function tmdb(pathAndQuery) {
   }
   const body = await r.json();
   tmdbCache.set(cacheKey, { ts: now, body });
-  // soft cap on cache size
   if (tmdbCache.size > 500) {
     const oldest = [...tmdbCache.entries()].sort((a, b) => a[1].ts - b[1].ts)[0];
     if (oldest) tmdbCache.delete(oldest[0]);
