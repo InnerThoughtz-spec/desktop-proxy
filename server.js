@@ -392,23 +392,41 @@ app.get('/api/music/status', async (_req, res) => {
     cache: { entries: musicCache.size },
     streamCache: { entries: typeof streamUrlCache !== 'undefined' ? streamUrlCache.size : 0 },
   };
-  // Active probe: try a known-good ID end-to-end with short timeouts.
+  // Active probe: walk every client and report which ones return audio
+  // formats from this host's IP. Tells the user at a glance whether
+  // YouTube is rejecting their IP entirely or just throttling specific
+  // clients — and which client to trust if/when we add an env override.
   if (_req.query.probe === '1') {
+    out.probe = { perClient: {} };
     try {
       const id = 'J7p4bzqLvCw'; // Blinding Lights
       const yt = await getYT();
-      const info = await yt.getInfo(id, { client: 'ANDROID_VR' });
-      const fmt = (info.streaming_data?.adaptive_formats || [])
-        .filter((f) => f.has_audio && !f.has_video)
-        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-      const url = fmt?.url || (fmt && await fmt.decipher(yt.session.player));
-      const r = await fetch(url, {
-        headers: { range: 'bytes=0-1023', origin: 'https://www.youtube.com', 'user-agent': 'Mozilla/5.0' },
-        signal: AbortSignal.timeout(8000),
-      });
-      out.probe = { ok: r.ok || r.status === 206, status: r.status };
+      for (const client of STREAM_CLIENTS) {
+        try {
+          const info = await yt.getInfo(id, { client });
+          const fmts = (info.streaming_data?.adaptive_formats || [])
+            .filter((f) => f.has_audio && !f.has_video);
+          if (!fmts.length) {
+            out.probe.perClient[client] = { ok: false, reason: 'empty_streaming_data' };
+            continue;
+          }
+          const fmt = fmts.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+          const url = fmt.url || await fmt.decipher(yt.session.player);
+          const r = await fetch(url, {
+            headers: { range: 'bytes=0-1023', origin: 'https://www.youtube.com', 'user-agent': 'Mozilla/5.0' },
+            signal: AbortSignal.timeout(8000),
+          });
+          out.probe.perClient[client] = { ok: r.ok || r.status === 206, status: r.status };
+        } catch (e) {
+          out.probe.perClient[client] = { ok: false, error: e.message.slice(0, 120) };
+        }
+      }
+      const winner = Object.entries(out.probe.perClient).find(([, v]) => v.ok);
+      out.probe.recommendedClient = winner ? winner[0] : null;
+      out.probe.ok = !!winner;
     } catch (e) {
-      out.probe = { ok: false, error: e.message };
+      out.probe.ok = false;
+      out.probe.error = e.message;
     }
   }
   res.json(out);
@@ -550,20 +568,22 @@ app.get('/api/music/track/:id', async (req, res) => {
       return res.json(cached);
     }
     const yt = await getYT();
-    // Use the ANDROID_VR client for metadata too. yt.music.getInfo (the
-    // WEB_REMIX path) often comes back with empty streaming_data on
-    // cloud IPs (Oracle/Fly/etc.) — YouTube's bot detection serves a
-    // metadata-only response. ANDROID_VR doesn't get hit by that. The
-    // client doesn't actually use the deciphered URLs anymore (it
-    // streams via /api/music/stream/:id which also uses ANDROID_VR);
-    // we just need the title/artist/cover/duration to be populated.
-    const info = await yt.getInfo(id, { client: 'ANDROID_VR' });
-    const formats = (info.streaming_data?.adaptive_formats || [])
-      .filter((f) => f.has_audio && !f.has_video)
-      .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-    // No early-return on empty formats — we still want to surface
-    // metadata so the now-playing bar populates while the stream
-    // proxy figures itself out separately.
+    // Walk the same multi-client chain as the stream proxy. The client
+    // doesn't actually use audioStreams from /track (it loads bytes
+    // through /api/music/stream/:id which also walks this chain), so
+    // even if NO client returns formats we still surface the metadata —
+    // basic_info.title etc. populate the now-playing bar while the
+    // stream endpoint resolves separately.
+    let info, formats = [], usedClient = null;
+    try {
+      const r = await getInfoWithFormats(yt, id);
+      info = r.info; formats = r.formats; usedClient = r.client;
+    } catch (e) {
+      // Last resort — get metadata-only from any client (typically WEB).
+      try { info = await yt.getInfo(id, { client: 'WEB' }); }
+      catch { info = await yt.getInfo(id); }
+    }
+    formats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
     const audioStreams = [];
     for (const f of formats) {
       try {
@@ -577,11 +597,12 @@ app.get('/api/music/track/:id', async (req, res) => {
       } catch { /* skip bad format */ }
     }
     const body = {
-      title: info.basic_info?.title || '',
-      uploader: info.basic_info?.author || '',
-      duration: info.basic_info?.duration || 0,
-      thumbnailUrl: info.basic_info?.thumbnail?.[0]?.url || '',
+      title: info?.basic_info?.title || '',
+      uploader: info?.basic_info?.author || '',
+      duration: info?.basic_info?.duration || 0,
+      thumbnailUrl: info?.basic_info?.thumbnail?.[0]?.url || '',
       audioStreams,
+      client: usedClient,
     };
     cacheSet(`track:${id}`, body);
     res.setHeader('Cache-Control', 'private, max-age=60');
@@ -603,29 +624,48 @@ const { pipeline } = require('node:stream/promises');
 const streamUrlCache = new Map(); // id -> { url, mime, ts }
 const STREAM_URL_TTL = 4 * 60 * 1000; // googlevideo URLs typically stay valid ~5min
 
+// Walk a list of clients until one returns audio-only adaptive_formats.
+// On cloud IPs (Oracle, Fly, etc.) YouTube's bot-heuristics serve
+// metadata-only or empty streaming_data to common clients; ANDROID_VR
+// is the most reliable but isn't always granted, so fall through to a
+// few alternatives before giving up. Returns { info, formats, client }.
+const STREAM_CLIENTS = ['ANDROID_VR', 'IOS', 'ANDROID', 'TV_EMBEDDED', 'WEB'];
+async function getInfoWithFormats(yt, id, clients = STREAM_CLIENTS) {
+  let lastErr = null;
+  for (const client of clients) {
+    try {
+      const info = await yt.getInfo(id, { client });
+      const formats = (info.streaming_data?.adaptive_formats || [])
+        .filter((f) => f.has_audio && !f.has_video);
+      if (formats.length) {
+        return { info, formats, client };
+      }
+      lastErr = new Error(`${client}: empty streaming_data`);
+    } catch (e) {
+      lastErr = new Error(`${client}: ${e.message}`);
+    }
+  }
+  throw lastErr || new Error('all clients exhausted');
+}
+
 async function resolveStream(id) {
   const hit = streamUrlCache.get(id);
   if (hit && (Date.now() - hit.ts) < STREAM_URL_TTL) return hit;
   const yt = await getYT();
-  // ANDROID_VR is the only client whose signed URLs aren't rate-limited
-  // by googlevideo's SABR enforcement — WEB_REMIX, IOS, TV_SIMPLY, MWEB
-  // and YTMUSIC all 403 after the first or second 512KB chunk. ANDROID
-  // 403s after one. ANDROID_VR happily streams the whole file. (This
-  // is the same trick yt-dlp uses for music extraction.)
-  const info = await yt.getInfo(id, { client: 'ANDROID_VR' });
-  const fmts = (info.streaming_data?.adaptive_formats || [])
-    .filter((f) => f.has_audio && !f.has_video);
-  if (!fmts.length) throw new Error('no audio formats');
-  // Prefer m4a (mp4a.40.2) for browser compatibility, then highest bitrate.
-  const m4a = fmts.filter((f) => /audio\/mp4/.test(f.mime_type));
-  const pick = (m4a.length ? m4a : fmts).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-  // ANDROID_VR formats often expose .url directly (no decipher needed),
-  // but fall through to decipher when the URL is missing.
+  // ANDROID_VR is the most reliable client (only one whose signed URLs
+  // aren't SABR-rate-limited), but if YouTube refuses it for this IP we
+  // fall through to IOS / ANDROID / TV_EMBEDDED / WEB. SABR will hit
+  // those harder but the chunked-512KB proxy compensates per-request.
+  const { info, formats, client } = await getInfoWithFormats(yt, id);
+  console.log(`[music] stream ${id} resolved via ${client}`);
+  const m4a = formats.filter((f) => /audio\/mp4/.test(f.mime_type));
+  const pick = (m4a.length ? m4a : formats).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
   const url = pick.url || await pick.decipher(yt.session.player);
   const out = {
     url,
     mime: pick.mime_type || 'audio/mp4',
     contentLength: pick.content_length ? parseInt(pick.content_length, 10) : 0,
+    client,
     ts: Date.now(),
   };
   streamUrlCache.set(id, out);
