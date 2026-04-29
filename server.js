@@ -317,15 +317,26 @@ let ytPromise = null;
 let ytInitTs = 0;
 let ytInitError = null;
 const YT_INIT_TIMEOUT = parseInt(process.env.MUSIC_INIT_TIMEOUT || '25000', 10);
+// Cloud-provider IPs (Oracle, Fly, AWS, GCP...) are flagged by YouTube's
+// bot heuristics — every client returns metadata-only with empty
+// streaming_data. The fix is a session cookie from a real browser,
+// which makes our requests look like a logged-in user. The user pastes
+// the value into the YT_COOKIE env var (and optionally YT_VISITOR_DATA)
+// and we feed it to Innertube.create. See server.js banner / README for
+// extraction instructions.
+const YT_COOKIE = process.env.YT_COOKIE || '';
+const YT_VISITOR_DATA = process.env.YT_VISITOR_DATA || '';
+function ytAuthSummary() {
+  return {
+    hasCookie: !!YT_COOKIE,
+    cookieLen: YT_COOKIE ? YT_COOKIE.length : 0,
+    hasVisitorData: !!YT_VISITOR_DATA,
+  };
+}
 function getYT() {
   if (ytPromise) return ytPromise;
   ytInitError = null;
   const t0 = Date.now();
-  // Race the real init with a hard timeout. On 256MB fly machines the
-  // YouTube player.js download + parse can hang or OOM — without the
-  // race, Innertube.create() never resolves and every music endpoint
-  // sits forever waiting (which is what "the page doesn't open" looks
-  // like in the browser).
   ytPromise = Promise.race([
     (async () => {
       const yt = require('youtubei.js');
@@ -337,9 +348,12 @@ function getYT() {
           timeout: 5000,
         });
       };
-      const inst = await Innertube.create({ retrieve_player: true });
+      const opts = { retrieve_player: true };
+      if (YT_COOKIE) opts.cookie = YT_COOKIE;
+      if (YT_VISITOR_DATA) opts.visitor_data = YT_VISITOR_DATA;
+      const inst = await Innertube.create(opts);
       ytInitTs = Date.now();
-      console.log(`[music] youtubei.js ready in ${ytInitTs - t0}ms`);
+      console.log(`[music] youtubei.js ready in ${ytInitTs - t0}ms${YT_COOKIE ? ' (with cookie auth)' : ''}`);
       return inst;
     })(),
     new Promise((_, rej) => setTimeout(() => {
@@ -389,6 +403,7 @@ app.get('/api/music/status', async (_req, res) => {
       lastError: ytInitError?.message || null,
       readyAt: ytInitTs || null,
     },
+    auth: ytAuthSummary(),
     cache: { entries: musicCache.size },
     streamCache: { entries: typeof streamUrlCache !== 'undefined' ? streamUrlCache.size : 0 },
   };
