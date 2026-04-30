@@ -226,6 +226,31 @@ try {
   };
 } catch (err) { logSwError('install.directBareFetch', err); }
 
+// Same bypass for Scramjet. Scramjet ships its own embedded bare-mux client
+// that listens on a BroadcastChannel('bare-mux') for `set` messages — but
+// our page-side bare-mux setup uses the SharedWorker transport API and
+// never broadcasts on that channel. The result: scram.client.active stays
+// null forever and every fetch throws "there are no bare clients", which
+// reaches our wrapper as a 500 and looks to the user like Scramjet "doesn't
+// load any websites." Replacing scram.client.fetch with directBareFetch
+// (which talks straight to /bare/v3/) skips bare-mux entirely.
+if (scram) {
+  try {
+    scram.client.fetch = async function(url, init) {
+      SW_COUNTERS.directBareCalls++;
+      try {
+        const r = await directBareFetch(url, init);
+        SW_COUNTERS.directBareOk++;
+        return r;
+      } catch (err) {
+        SW_COUNTERS.directBareFail++;
+        logSwError('scram.directBareFetch', err, { url: String(url), method: init && init.method });
+        throw err;
+      }
+    };
+  } catch (err) { logSwError('install.scram.directBareFetch', err); }
+}
+
 // --- In-page shim injected into every proxied HTML document ---
 // Runs inside the proxied page (same-origin with our top frame) as the first
 // script in <head>. Goals:
