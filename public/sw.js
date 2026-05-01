@@ -381,6 +381,135 @@ const PAGE_SHIM = String.raw`(function(){
     } else {
       start();
     }
+
+    // ---- Runtime URL interceptor ----
+    // The static rewriter (UV's HTML/JS pass + Scramjet's bundle) only
+    // catches URLs that exist in HTML attributes / inline JS at fetch
+    // time. Anything constructed at runtime — e.g. DDG's analytics
+    // POSTs to improving.duckduckgo.com, Twitter's API calls, sites
+    // that build URLs from JSON config — slips through and the browser
+    // fires it at the real cross-origin host (CORS-blocked, fails).
+    // We patch the dynamic APIs (fetch, XHR, WebSocket, EventSource,
+    // sendBeacon) to detect cross-origin URLs and rewrite them to the
+    // proxy prefix using whichever engine's encoder is present in the
+    // page (Scramjet bundles its own; UV does not, so this is mostly
+    // a Scramjet helper but works for both).
+    function getEncoder() {
+      try {
+        if (self.__scramjet$bundle && self.__scramjet$bundle.rewriters && self.__scramjet$bundle.rewriters.url) {
+          var enc = self.__scramjet$bundle.rewriters.url.encodeUrl;
+          return function(absUrl) {
+            try {
+              var r = enc(absUrl, new URL(absUrl));
+              // scramjet returns full URL — strip origin to keep it
+              // same-origin so the SW intercepts on next request.
+              if (typeof r === 'string' && r.indexOf(location.origin) === 0) {
+                return r.slice(location.origin.length);
+              }
+              return r;
+            } catch (_) { return null; }
+          };
+        }
+        if (self.__uv$config && typeof self.__uv$config.encodeUrl === 'function') {
+          var encUV = self.__uv$config.encodeUrl;
+          var prefix = self.__uv$config.prefix || '/service/';
+          return function(absUrl) {
+            try { return prefix + encUV(absUrl); } catch (_) { return null; }
+          };
+        }
+      } catch (_) {}
+      return null;
+    }
+
+    function rewriteUrl(url) {
+      if (!url) return url;
+      var s = (typeof url === 'string') ? url : (url && url.toString ? url.toString() : '');
+      if (!s) return url;
+      // Skip non-http(s) / non-ws schemes — data:, blob:, javascript:,
+      // about:, mailto:, tel:, chrome-extension:, etc. all pass through.
+      if (/^(data|blob|javascript|about|mailto|tel|chrome|chrome-extension|file|moz-extension):/i.test(s)) return url;
+      var abs;
+      try { abs = new URL(s, location.href); } catch (_) { return url; }
+      if (!/^(https?|wss?):/i.test(abs.protocol)) return url;
+      // Already same origin — already proxied or local; don't double-encode.
+      if (abs.origin === location.origin) return url;
+      var enc = getEncoder();
+      if (!enc) return url;
+      var rewritten = enc(abs.href);
+      return rewritten || url;
+    }
+
+    // --- fetch ---
+    if (typeof self.fetch === 'function') {
+      var origFetch = self.fetch.bind(self);
+      self.fetch = function(input, init) {
+        try {
+          if (typeof input === 'string') {
+            input = rewriteUrl(input);
+          } else if (input && typeof input === 'object' && 'url' in input) {
+            var nu = rewriteUrl(input.url);
+            if (nu !== input.url) {
+              try { input = new Request(nu, input); } catch (_) { /* opaque */ }
+            }
+          }
+        } catch (_) {}
+        return origFetch(input, init);
+      };
+    }
+
+    // --- XMLHttpRequest ---
+    if (self.XMLHttpRequest && self.XMLHttpRequest.prototype && self.XMLHttpRequest.prototype.open) {
+      var origOpen = self.XMLHttpRequest.prototype.open;
+      self.XMLHttpRequest.prototype.open = function(method, url) {
+        var args = Array.prototype.slice.call(arguments);
+        try { args[1] = rewriteUrl(args[1]); } catch (_) {}
+        return origOpen.apply(this, args);
+      };
+    }
+
+    // --- WebSocket --- scramjet bundles its own WS impl too, but only
+    // when its client is loaded in the page. Patching the global makes
+    // sure dynamic ws:// / wss:// URLs we missed at HTML-rewrite time
+    // still get routed through the SW.
+    if (typeof self.WebSocket === 'function') {
+      var OrigWS = self.WebSocket;
+      function PatchedWS(url, protocols) {
+        try { url = rewriteUrl(url); } catch (_) {}
+        return arguments.length > 1 ? new OrigWS(url, protocols) : new OrigWS(url);
+      }
+      try {
+        PatchedWS.prototype = OrigWS.prototype;
+        PatchedWS.CONNECTING = OrigWS.CONNECTING;
+        PatchedWS.OPEN = OrigWS.OPEN;
+        PatchedWS.CLOSING = OrigWS.CLOSING;
+        PatchedWS.CLOSED = OrigWS.CLOSED;
+        self.WebSocket = PatchedWS;
+      } catch (_) {}
+    }
+
+    // --- EventSource ---
+    if (typeof self.EventSource === 'function') {
+      var OrigES = self.EventSource;
+      function PatchedES(url, opts) {
+        try { url = rewriteUrl(url); } catch (_) {}
+        return arguments.length > 1 ? new OrigES(url, opts) : new OrigES(url);
+      }
+      try {
+        PatchedES.prototype = OrigES.prototype;
+        self.EventSource = PatchedES;
+      } catch (_) {}
+    }
+
+    // --- sendBeacon (analytics-style POST that doesn't expect a response) ---
+    if (navigator.sendBeacon) {
+      try {
+        var origBeacon = navigator.sendBeacon.bind(navigator);
+        navigator.sendBeacon = function(url, data) {
+          try { url = rewriteUrl(url); } catch (_) {}
+          return origBeacon(url, data);
+        };
+      } catch (_) {}
+    }
   } catch(e){}
 })();`;
 
@@ -435,18 +564,56 @@ self.addEventListener('fetch', (event) => {
   const isUV = url.startsWith(location.origin + uvPrefix());
   const isScram = !isUV && scram && url.startsWith(location.origin + scramPrefix());
 
-  // Scramjet path — let its own SW handler do everything (HTML rewrite, JS
-  // rewrite, header stripping, etc). We deliberately do NOT pipe through our
-  // UV-flavoured response post-processing here so the comparison against UV
-  // is fair: both engines run their stock pipeline.
+  // Scramjet path — same post-processing pipeline as UV: scramjet's own
+  // HTML/JS rewriter handles the static URL pass, then we layer our
+  // PAGE_SHIM (runtime fetch/XHR/WebSocket interceptor for dynamically-
+  // constructed URLs that scramjet's static rewriter misses) and strip
+  // the same headers (CSP / XFO / COEP / etc.) that block iframing.
+  // Without this, scramjet works for static sites but breaks on SPAs
+  // that build URLs from JSON config or analytics SDKs at runtime.
   if (isScram) {
     event.respondWith((async () => {
-      try { return await scram.fetch(event); }
+      let resp;
+      try { resp = await scram.fetch(event); }
       catch (err) {
         logSwError('scram.fetch', err, { url: req.url, method: req.method });
         return new Response(JSON.stringify({ error: 'scramjet_failed', detail: String(err && err.message || err) }), {
           status: 502, statusText: 'Bad Gateway',
           headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      const headers = new Headers();
+      try {
+        resp.headers.forEach((v, k) => {
+          if (!STRIP_HEADERS.includes(k.toLowerCase())) headers.set(k, v);
+        });
+      } catch (err) { logSwError('scram.headers.forEach', err); }
+
+      const nullBody = NULL_BODY_STATUSES.has(resp.status);
+      const ct = (resp.headers.get('content-type') || '').toLowerCase();
+      try {
+        SW_LAST_PROXIED.push({ url: req.url.slice(0, 140), method: req.method, status: resp.status, ct: ct.slice(0, 60), engine: 'scram' });
+        if (SW_LAST_PROXIED.length > 20) SW_LAST_PROXIED.splice(0, SW_LAST_PROXIED.length - 20);
+      } catch (_) {}
+
+      if (nullBody || !ct.includes('text/html')) {
+        return new Response(nullBody ? null : resp.body, {
+          status: resp.status, statusText: resp.statusText, headers,
+        });
+      }
+
+      try {
+        const html = await resp.text();
+        const injected = injectShim(html);
+        headers.delete('content-length');
+        headers.delete('content-encoding');
+        SW_COUNTERS.htmlInjections++;
+        return new Response(injected, { status: resp.status, statusText: resp.statusText, headers });
+      } catch (err) {
+        logSwError('scram.injectShim', err, { url: req.url, status: resp.status });
+        return new Response(nullBody ? null : resp.body, {
+          status: resp.status, statusText: resp.statusText, headers,
         });
       }
     })());
