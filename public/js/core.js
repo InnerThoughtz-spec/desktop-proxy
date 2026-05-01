@@ -1061,7 +1061,16 @@
         const expected = location.origin + (self.__scramjet$config?.prefix || '/scram/');
         return typeof enc === 'string' && enc.startsWith(expected) ? enc.slice(expected.length) : enc;
       },
-      decodeUrl: (u) => self.__scramjet$bundle.rewriters.url.decodeUrl(u),
+      // Symmetric to encodeUrl: callers pass the encoded *suffix*
+      // (everything after /scram/), but scramjet's own decodeUrl expects
+      // a full origin-rooted URL so it can slice the prefix off itself.
+      // Skip that and call the codec directly. Without this, the browser
+      // app's URL bar displays the encoded blob instead of the readable
+      // URL after every navigation.
+      decodeUrl: (u) => {
+        try { return self.__scramjet$config.codec.decode(u); }
+        catch (_) { return u; }
+      },
       available: () => !!(self.__scramjet$bundle && self.__scramjet$bundle.rewriters),
     },
   };
