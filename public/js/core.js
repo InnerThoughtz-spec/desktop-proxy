@@ -1037,9 +1037,30 @@
       label: 'Scramjet',
       config:    () => self.__scramjet$config || null,
       prefix:    () => (self.__scramjet$config && self.__scramjet$config.prefix) || '/scram/',
-      // Scramjet's encoder lives on the bundle global; the codec is wired in
-      // its config so calling encodeUrl bottoms out at codec.encode internally.
-      encodeUrl: (u) => self.__scramjet$bundle.rewriters.url.encodeUrl(u),
+      // Two impedance mismatches between scramjet's encoder and what we
+      // want from this wrapper:
+      //
+      //   1) When called without a base URL, scramjet tries to derive
+      //      one from `location.href` assuming the page is itself
+      //      already proxied (e.g. served at /scram/<encoded>). On the
+      //      Inner-OS page that's not the case, so it ends up calling
+      //      `new URL("")` and throws "Failed to construct 'URL'".
+      //      Fix: explicitly pass `new URL(u)` as the base. If `u` is
+      //      already absolute (the only case we hit from navigateTab),
+      //      this short-circuits cleanly.
+      //
+      //   2) Scramjet's encoder returns the FULL proxied URL,
+      //      `https://<origin>/scram/<encoded>`. UV's encoder returns
+      //      ONLY the encoded bit. The browser app prepends prefix()
+      //      itself, expecting UV's contract — without this, the
+      //      iframe src ends up doubled-up like
+      //        /scram/https://inneros.dpdns.org/scram/<encoded>.
+      //      Strip the origin+prefix here so both engines match.
+      encodeUrl: (u) => {
+        const enc = self.__scramjet$bundle.rewriters.url.encodeUrl(u, new URL(u));
+        const expected = location.origin + (self.__scramjet$config?.prefix || '/scram/');
+        return typeof enc === 'string' && enc.startsWith(expected) ? enc.slice(expected.length) : enc;
+      },
       decodeUrl: (u) => self.__scramjet$bundle.rewriters.url.decodeUrl(u),
       available: () => !!(self.__scramjet$bundle && self.__scramjet$bundle.rewriters),
     },
