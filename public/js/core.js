@@ -939,6 +939,72 @@
     saveState();
   }
 
+  // ---- UV cookie store self-heal ----
+  // UV v3.2.10 has a bug in its cookie cleanup pass: it iterates every row
+  // in the `__op` IndexedDB and calls `r.set.getTime()`. If any row was
+  // written by an older UV version (or got corrupted), `r.set` may be a
+  // string instead of a Date and the whole proxy request fails with
+  // "TypeError: r.set.getTime is not a function". We open the same IDB,
+  // walk all cookies, and either coerce `r.set` to a Date or delete the
+  // row outright. Runs on boot so the next UV navigation finds a clean
+  // store. Fast (10-50ms typical) and no-op when the store is already
+  // healthy.
+  function healUVCookies() {
+    return new Promise((resolve) => {
+      let req;
+      try { req = indexedDB.open('__op', 1); }
+      catch { return resolve(0); }
+      req.onerror = () => resolve(-1);
+      req.onblocked = () => resolve(-1);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('cookies')) {
+          db.createObjectStore('cookies', { keyPath: 'id' }).createIndex('path', 'path');
+        }
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('cookies')) { db.close(); return resolve(0); }
+        let tx;
+        try { tx = db.transaction(['cookies'], 'readwrite'); }
+        catch { db.close(); return resolve(-1); }
+        const store = tx.objectStore('cookies');
+        const all = store.getAll();
+        all.onsuccess = () => {
+          let healed = 0;
+          for (const c of all.result) {
+            if (!c) continue;
+            // `set` should be a Date; if it's a string/number, try to coerce,
+            // and if that fails too, drop the row so UV can rewrite it.
+            if (!(c.set instanceof Date) || typeof c.set.getTime !== 'function') {
+              const coerced = new Date(c.set);
+              if (Number.isFinite(coerced.getTime())) {
+                c.set = coerced;
+                store.put(c);
+              } else {
+                store.delete(c.id);
+              }
+              healed++;
+            }
+            // Same defense for `expires`, which UV may also call methods on.
+            if (c.expires != null && !(c.expires instanceof Date)) {
+              const coerced = new Date(c.expires);
+              if (Number.isFinite(coerced.getTime())) {
+                c.expires = coerced;
+                store.put(c);
+              }
+            }
+          }
+          tx.oncomplete = () => { db.close(); resolve(healed); };
+          tx.onerror = () => { db.close(); resolve(-1); };
+        };
+        all.onerror = () => { db.close(); resolve(-1); };
+      };
+      // Hard timeout — never block boot for more than a couple seconds.
+      setTimeout(() => resolve(-1), 2500);
+    });
+  }
+
   // ---- Boot ----
   function boot() {
     applyPerfMode();
@@ -946,6 +1012,11 @@
     applyWallpaper();
     setFpsVisible(state.fpsVisible !== false);
     startFps();
+
+    // Run the UV cookie self-heal in the background — don't block boot.
+    healUVCookies().then((n) => {
+      if (n > 0) console.log(`[uv-heal] healed ${n} corrupt cookie row(s)`);
+    });
 
     // show lock first; desktop renders behind it hidden until unlock
     showLock();
@@ -1274,6 +1345,7 @@
       getEngine: getEngineId,
       setEngine: setEngineId,
       list: () => Object.values(PROXY_ENGINES).map((e) => ({ id: e.id, label: e.label, available: e.available() })),
+      healCookies: healUVCookies,
     },
   };
   // Shorter alias used by apps.js

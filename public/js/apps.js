@@ -3217,6 +3217,11 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         if (currentMode === 'proxy') {
           try {
             await waitForUV(15000);
+            // UV v3.2.10 cookie-store self-heal — silently fixes corrupt
+            // rows that would otherwise throw "r.set.getTime is not a
+            // function" inside UV's request pipeline. Cheap (one IDB
+            // read), idempotent, no-op when the store is already healthy.
+            try { await OS.proxy.healCookies?.(); } catch (_) {}
             const eng = OS.proxy.engineFor(OS.proxy.getEngine());
             if (!eng || typeof eng.encodeUrl !== 'function' || typeof eng.prefix !== 'function') {
               throw new Error('proxy engine not available');
