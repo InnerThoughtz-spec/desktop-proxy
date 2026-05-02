@@ -2115,10 +2115,12 @@ input, textarea { font: inherit; color: inherit; }
 
 /* ===========================================================================
    Cloud Gaming — launcher for real cloud-streaming services. The iframe
-   inside .cg-player-frame goes DIRECT (not through UV/Scramjet) because
-   WebRTC needs low latency. CSS just provides the tile grid and a small
-   chrome bar over the streamed player. Accent color is NVIDIA green to
-   match the GeForce NOW brand mark used in the dock glyph. */
+   loads either DIRECT (Now.gg, anything else that allows iframing) or
+   through the UV proxy (default — strips X-Frame-Options for providers
+   like GeForce NOW that refuse iframing). The actual game video is
+   peer-to-peer WebRTC, so the proxy doesn't affect stream latency.
+   Accent color is NVIDIA green to match the GeForce NOW brand mark
+   used in the dock glyph. */
 
 .cg-app {
   position: absolute; inset: 0;
@@ -2142,6 +2144,64 @@ input, textarea { font: inherit; color: inherit; }
   text-shadow: 0 0 10px rgba(118,185,0,.5), 0 0 22px rgba(118,185,0,.25);
 }
 .cg-wordmark b { color: #76B900; font-weight: 800; }
+
+/* Status indicator pill — green dot when connected, amber when
+   connecting, red when something went wrong. Sits in the topbar next
+   to the wordmark so the user always knows the iframe state. */
+.cg-status {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px; letter-spacing: .08em; text-transform: uppercase;
+  font-weight: 700;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.85);
+}
+.cg-status::before {
+  content: '';
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.5);
+  box-shadow: 0 0 6px currentColor;
+}
+.cg-status[data-kind="connecting"] { color: #ffd166; border-color: rgba(255,209,102,.4); }
+.cg-status[data-kind="connecting"]::before {
+  background: #ffd166;
+  animation: cg-pulse 1.1s ease-in-out infinite;
+}
+.cg-status[data-kind="connected"]  { color: #5ce2a0; border-color: rgba(92,226,160,.4); }
+.cg-status[data-kind="connected"]::before { background: #5ce2a0; }
+.cg-status[data-kind="error"]      { color: #ff8a8a; border-color: rgba(255,138,138,.4); }
+.cg-status[data-kind="error"]::before { background: #ff8a8a; }
+@keyframes cg-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .35; transform: scale(.7); }
+}
+
+/* Session countdown — shown when a service has a free-tier time limit
+   (GeForce NOW free is 60 minutes). Color shifts amber at 5min, red
+   at 30s, "Session ended" once it expires. We can't actually enforce
+   anything; we just show the limit the provider will impose. */
+.cg-timer {
+  display: inline-flex; align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11.5px; font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.85);
+}
+.cg-timer[data-warn="soon"]     { color: #ffd166; border-color: rgba(255,209,102,.5); }
+.cg-timer[data-warn="critical"] {
+  color: #ff8a8a; border-color: rgba(255,138,138,.5);
+  animation: cg-pulse 1s ease-in-out infinite;
+}
+.cg-timer[data-warn="expired"]  {
+  color: #ff8a8a; background: rgba(255,138,138,.12);
+  border-color: rgba(255,138,138,.5);
+}
 
 .cg-stage {
   position: relative;
@@ -2181,6 +2241,27 @@ input, textarea { font: inherit; color: inherit; }
               0 0 24px color-mix(in srgb, var(--cg-accent) 30%, transparent);
   outline: none;
 }
+/* Header row inside the tile holds the logo plus a tier badge so the
+   user can scan FREE / SUB / FREE+SUB at a glance. */
+.cg-tile-head {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+}
+.cg-tile-tier {
+  font-size: 10px; letter-spacing: .14em;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.7);
+  white-space: nowrap;
+}
+.cg-tile-tier[data-tier="free"]  { color: #5ce2a0; border-color: rgba(92,226,160,.45); background: rgba(92,226,160,.08); }
+.cg-tile-tier[data-tier="paid"]  { color: #ffd166; border-color: rgba(255,209,102,.45); background: rgba(255,209,102,.08); }
+.cg-tile-tier[data-tier="mixed"] { color: var(--cg-accent); border-color: color-mix(in srgb, var(--cg-accent) 45%, transparent); background: color-mix(in srgb, var(--cg-accent) 10%, transparent); }
+
 .cg-tile-logo {
   width: 56px; height: 56px;
   border-radius: 12px;
@@ -2188,6 +2269,7 @@ input, textarea { font: inherit; color: inherit; }
   display: flex; align-items: center; justify-content: center;
   border: 1px solid rgba(255,255,255,.06);
   overflow: hidden;
+  flex: 0 0 auto;
 }
 .cg-tile-logo img {
   width: 36px; height: 36px;
@@ -2244,6 +2326,16 @@ input, textarea { font: inherit; color: inherit; }
   font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
   color: rgba(118,185,0,.8);
 }
+/* Mode chip in the player bar — tiny PROXY/DIRECT pill so the user can
+   see at a glance which path the iframe is using. */
+.cg-player-mode {
+  font-size: 10px; letter-spacing: .14em; font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: rgba(255,255,255,.06);
+  color: rgba(255,255,255,.6);
+  border: 1px solid rgba(255,255,255,.08);
+}
 .cg-player-frame {
   flex: 1 1 auto;
   width: 100%;
@@ -2267,9 +2359,46 @@ input, textarea { font: inherit; color: inherit; }
   color: rgba(255,255,255,.55);
   background: rgba(7,9,13,.85);
   border-top: 1px solid rgba(255,255,255,.06);
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 220px;
+  overflow: auto;
 }
 .cg-fallback a { color: #76B900; text-decoration: none; }
 .cg-fallback a:hover { text-decoration: underline; }
+.cg-fallback-line { font-size: 11.5px; line-height: 1.45; }
+.cg-fallback code {
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: 11px;
+  background: rgba(255,255,255,.06);
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+
+/* Per-service tips disclosure. Lives under the iframe and starts open
+   on first launch so the user sees them; clicking the summary collapses. */
+.cg-tips { font-size: 11.5px; }
+.cg-tips summary {
+  cursor: pointer;
+  font-size: 10.5px; letter-spacing: .12em; text-transform: uppercase;
+  font-weight: 700;
+  color: rgba(118,185,0,.8);
+  padding: 2px 0;
+  list-style: none;
+}
+.cg-tips summary::-webkit-details-marker { display: none; }
+.cg-tips summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transition: transform .12s var(--ease);
+}
+.cg-tips[open] summary::before { transform: rotate(90deg); }
+.cg-tips ul {
+  margin: 4px 0 2px;
+  padding-left: 18px;
+  color: rgba(255,255,255,.7);
+}
+.cg-tips li { margin: 2px 0; line-height: 1.45; }
 
 @media (max-width: 760px) {
   .cg-grid { grid-template-columns: 1fr; }

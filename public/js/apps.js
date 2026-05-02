@@ -3066,52 +3066,126 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
   }
 
   // ---------- Cloud Gaming ----------
-  // Launcher for real cloud gaming services (GeForce NOW, Xbox Cloud,
-  // Boosteroid, Now.gg). The actual games run on the cloud provider's
-  // GPU servers and stream the video back over WebRTC; we just iframe
-  // the service. Important: cloud streaming needs a direct connection
-  // for low-latency video, so the iframe goes DIRECT (not through
-  // UV/Scramjet) — the proxy would add fatal latency and break WebRTC.
-  // Users sign in with their own accounts; queue/ad/time-limit policies
-  // are whatever each service grants their user tier.
+  // Launcher for real cloud-gaming services. The games actually run on
+  // each provider's GPU servers; the browser just receives a WebRTC
+  // video stream. Inner-OS picks the right load mode per service
+  // (direct iframe vs through UV proxy), tracks free-tier session
+  // limits, and exposes a refresh / fullscreen / mode-flip toolbar.
+  // Stream quality is unaffected by the proxy — WebRTC video goes
+  // peer-to-peer over UDP regardless. Proxy mode only matters for the
+  // initial page load + signaling, since most providers send
+  // X-Frame-Options: DENY (UV strips it).
   OS.registerApp('cloud-gaming', {
     title: 'Cloud Gaming',
     glyphURL: 'https://cdn.simpleicons.org/nvidia/76B900',
     singleInstance: true,
     defaultW: 1180, defaultH: 760,
     mount(root) {
+      // Per-service config:
+      //   defaultMode    — 'proxy' or 'direct'. Most providers refuse
+      //                    iframing, so 'proxy' is the default.
+      //   sessionLimitMin— if the provider enforces a free-tier session
+      //                    timeout, surface a countdown badge.
+      //   tier           — 'free' | 'paid' | 'mixed' badge on the tile.
+      //   tips           — short bullets shown under the player iframe.
       const SERVICES = [
         {
           id: 'gfn',
           name: 'GeForce NOW',
-          tagline: "Bring your Steam / Epic / Rockstar / Ubisoft library. Free tier has a queue + 1-hour sessions; Priority is $9.99/mo.",
+          tagline: 'Bring your Steam / Epic / Rockstar / Ubisoft library. Free tier: queue + 1-hour sessions. Priority $9.99/mo. Ultimate $19.99/mo (4K).',
           url: 'https://play.geforcenow.com/',
           logo: 'https://cdn.simpleicons.org/nvidia/76B900',
           accent: '#76B900',
+          tier: 'mixed',
+          defaultMode: 'proxy',
+          sessionLimitMin: 60,
+          tips: [
+            '1-hour sessions on the free tier (countdown shown above)',
+            'Peak-hour queue can be 5–30 minutes — check your spot in the corner',
+            'Sign in with the same account you use on Steam / Epic / Ubisoft Connect',
+            'For 4K and no time limit, upgrade to Ultimate at play.geforcenow.com',
+          ],
         },
         {
           id: 'xbox',
-          name: 'Xbox Cloud Gaming',
-          tagline: 'Hundreds of games via Xbox Game Pass Ultimate ($14.99/mo). No queue.',
+          name: 'Xbox Cloud',
+          tagline: 'Hundreds of games via Xbox Game Pass Ultimate ($14.99/mo). No queue, full controller support, native gamepad routing.',
           url: 'https://www.xbox.com/play',
           logo: 'https://cdn.simpleicons.org/xbox/107C10',
           accent: '#107C10',
+          tier: 'paid',
+          defaultMode: 'proxy',
+          sessionLimitMin: null,
+          tips: [
+            'Requires Xbox Game Pass Ultimate ($14.99/mo)',
+            'Best with an Xbox controller — keyboard works for most titles',
+            'Sessions are unlimited as long as input is detected',
+          ],
         },
         {
           id: 'boosteroid',
           name: 'Boosteroid',
-          tagline: 'Subscription-based ($7.99/mo), no queue, includes GTA V.',
+          tagline: 'Subscription only ($7.99/mo). No queue. Includes GTA V, Cyberpunk, Fortnite, more.',
           url: 'https://cloud.boosteroid.com/',
           logo: '',
           accent: '#9146FF',
+          tier: 'paid',
+          defaultMode: 'proxy',
+          sessionLimitMin: null,
+          tips: [
+            'Requires a Boosteroid subscription ($7.99/mo and up)',
+            'No queue at any tier — that is the main selling point',
+            'Bring your own Steam / Epic accounts to log into game launchers',
+          ],
         },
         {
           id: 'nowgg',
           name: 'Now.gg',
-          tagline: 'Free Android-game cloud — Roblox, mobile titles. Instant launch, no install.',
+          tagline: 'Free Android-game cloud. Roblox, mobile titles, instant launch. No install, no account required for most games.',
           url: 'https://now.gg/',
           logo: '',
           accent: '#008CCF',
+          tier: 'free',
+          // Now.gg explicitly allows iframing — direct mode is faster.
+          defaultMode: 'direct',
+          sessionLimitMin: null,
+          tips: [
+            'Free, no signup needed for most titles',
+            'Mobile / Android games only (Roblox, Among Us, Minecraft Education, etc.)',
+            'Touch input is auto-mapped to mouse — works on Chromebooks',
+          ],
+        },
+        {
+          id: 'luna',
+          name: 'Amazon Luna',
+          tagline: 'Amazon\'s cloud platform. Free games rotate weekly with Prime; channels add libraries (Ubisoft+, Retro, Family).',
+          url: 'https://luna.amazon.com/',
+          logo: 'https://cdn.simpleicons.org/amazonluna/9146FF',
+          accent: '#FF9900',
+          tier: 'mixed',
+          defaultMode: 'proxy',
+          sessionLimitMin: null,
+          tips: [
+            'Free tier with Amazon Prime — rotating weekly free games',
+            'Channels are separate subscriptions (Ubisoft+, Family, Retro)',
+            'Best on Chrome/Edge — Luna is picky about WebRTC support',
+          ],
+        },
+        {
+          id: 'shadow',
+          name: 'Shadow PC',
+          tagline: 'Rents you a full Windows 11 cloud PC with a dedicated GPU ($29.99/mo+). Install anything; it is your own machine.',
+          url: 'https://shadow.tech/',
+          logo: '',
+          accent: '#3D7EFF',
+          tier: 'paid',
+          defaultMode: 'proxy',
+          sessionLimitMin: null,
+          tips: [
+            'A real Windows 11 PC, not a game-streaming catalog',
+            'Install anything from Steam / Epic / Battle.net / Riot — your own files',
+            'Subscription required; no queue, no time limit',
+          ],
         },
       ];
 
@@ -3120,7 +3194,10 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           <div class="cg-topbar" data-drag-handle>
             <button class="is-iconbtn" data-act="cg-back" hidden title="Back to launcher">‹</button>
             <div class="cg-wordmark">Cloud<b>Gaming</b></div>
+            <div class="cg-status" data-role="status" hidden></div>
+            <div class="cg-timer" data-role="timer" hidden></div>
             <div style="flex:1"></div>
+            <button class="is-iconbtn" data-act="cg-reload" title="Reload" hidden>↻</button>
             <button class="is-iconbtn" data-act="cg-fs" title="Fullscreen (Esc twice to exit)" hidden>⛶</button>
             <button class="is-iconbtn" data-act="cg-min" title="Minimize">—</button>
             <button class="is-iconbtn" data-act="cg-close" title="Close">✕</button>
@@ -3128,10 +3205,13 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           <div class="cg-stage" data-role="stage"></div>
         </div>`;
 
-      const stageEl  = root.querySelector('[data-role="stage"]');
-      const backBtn  = root.querySelector('[data-act="cg-back"]');
-      const fsBtn    = root.querySelector('[data-act="cg-fs"]');
-      const winEl    = root.closest('.win');
+      const stageEl    = root.querySelector('[data-role="stage"]');
+      const backBtn    = root.querySelector('[data-act="cg-back"]');
+      const fsBtn      = root.querySelector('[data-act="cg-fs"]');
+      const reloadBtn  = root.querySelector('[data-act="cg-reload"]');
+      const statusEl   = root.querySelector('[data-role="status"]');
+      const timerEl    = root.querySelector('[data-role="timer"]');
+      const winEl      = root.closest('.win');
 
       root.querySelector('[data-act="cg-min"]')?.addEventListener('click', () => {
         winEl?.querySelector('.win-min')?.click();
@@ -3140,26 +3220,81 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         winEl?.querySelector('.win-close')?.click();
       });
 
+      function setStatus(kind, text) {
+        if (!kind) { statusEl.hidden = true; statusEl.textContent = ''; statusEl.dataset.kind = ''; return; }
+        statusEl.hidden = false;
+        statusEl.dataset.kind = kind; // 'connecting' | 'connected' | 'error'
+        statusEl.textContent = text || '';
+      }
+
+      // Session timer for services with a free-tier limit (e.g. GFN free
+      // tier is 60 minutes). Visual countdown in the topbar; warnings at
+      // 5min and 30s remaining. We can't actually block the session — we
+      // just surface the timer the user is going to hit anyway.
+      let timerHandle = null;
+      let timerLaunchTs = 0;
+      function startTimer(minutes) {
+        stopTimer();
+        if (!minutes) return;
+        timerLaunchTs = Date.now();
+        const totalMs = minutes * 60 * 1000;
+        function tick() {
+          const remaining = totalMs - (Date.now() - timerLaunchTs);
+          if (remaining <= 0) {
+            timerEl.hidden = false;
+            timerEl.dataset.warn = 'expired';
+            timerEl.textContent = 'Session ended';
+            stopTimer();
+            return;
+          }
+          const m = Math.floor(remaining / 60000);
+          const s = Math.floor((remaining % 60000) / 1000);
+          timerEl.hidden = false;
+          timerEl.dataset.warn = remaining < 30 * 1000 ? 'critical'
+                              : remaining < 5 * 60 * 1000 ? 'soon'
+                              : '';
+          timerEl.textContent = `${m}:${s < 10 ? '0' + s : s} left`;
+        }
+        tick();
+        timerHandle = setInterval(tick, 1000);
+      }
+      function stopTimer() {
+        if (timerHandle) { clearInterval(timerHandle); timerHandle = null; }
+        timerEl.hidden = true;
+        timerEl.textContent = '';
+        timerEl.dataset.warn = '';
+      }
+
       function showHome() {
         backBtn.hidden = true;
         fsBtn.hidden = true;
+        reloadBtn.hidden = true;
+        setStatus(null);
+        stopTimer();
         stageEl.innerHTML = `
           <div class="cg-grid">
-            ${SERVICES.map((s) => `
+            ${SERVICES.map((s) => {
+              const tierLabel = s.tier === 'free' ? 'FREE'
+                              : s.tier === 'paid' ? 'SUB'
+                              : 'FREE / SUB';
+              return `
               <button class="cg-tile" data-launch="${s.id}" style="--cg-accent:${s.accent}">
-                <div class="cg-tile-logo">
-                  ${s.logo
-                    ? `<img src="${escapeHtml(s.logo)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cg-tile-logo-fallback',textContent:'${escapeHtml(s.name.charAt(0))}'}))">`
-                    : `<div class="cg-tile-logo-fallback">${escapeHtml(s.name.charAt(0))}</div>`}
+                <div class="cg-tile-head">
+                  <div class="cg-tile-logo">
+                    ${s.logo
+                      ? `<img src="${escapeHtml(s.logo)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cg-tile-logo-fallback',textContent:'${escapeHtml(s.name.charAt(0))}'}))">`
+                      : `<div class="cg-tile-logo-fallback">${escapeHtml(s.name.charAt(0))}</div>`}
+                  </div>
+                  <span class="cg-tile-tier" data-tier="${s.tier}">${tierLabel}</span>
                 </div>
                 <div class="cg-tile-name">${escapeHtml(s.name)}</div>
                 <div class="cg-tile-tagline">${escapeHtml(s.tagline)}</div>
                 <span class="cg-tile-cta">Launch ›</span>
-              </button>
-            `).join('')}
+              </button>`;
+            }).join('')}
           </div>
           <div class="cg-note">
-            <strong>How this works:</strong> the actual games run on each service's GPU servers; your browser receives a video stream over WebRTC. You sign in with your own account on each platform — Inner-OS doesn't host the games or relay the streams. Cloud-gaming services need a direct connection for low-latency video, so they bypass the desktop's UV/Scramjet proxy.
+            <strong>How this works:</strong> the actual games run on each service's GPU servers; your browser receives a video stream over WebRTC peer-to-peer. You sign in with your own account on each platform — Inner-OS doesn't host games or relay streams. Most providers refuse iframing, so the launcher loads them through the desktop's UV proxy, which strips <code>X-Frame-Options</code>. Stream latency is unaffected by the proxy because WebRTC bypasses it.
           </div>`;
         stageEl.querySelectorAll('[data-launch]').forEach((btn) => {
           btn.addEventListener('click', () => {
@@ -3170,23 +3305,25 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       }
 
       // Track which mode each service is currently mounted with so the
-      // "Try direct" / "Try via proxy" toggle can flip without losing the
+      // toolbar buttons (toggle, reload) can flip without losing the
       // svc reference. mode: 'proxy' | 'direct'.
       let currentSvc = null;
-      let currentMode = 'proxy';
+      let currentMode = null;
 
       async function playService(svc, mode) {
+        const targetMode = mode || svc.defaultMode || 'proxy';
         currentSvc = svc;
-        currentMode = mode || 'proxy';
+        currentMode = targetMode;
         backBtn.hidden = false;
         fsBtn.hidden = false;
+        reloadBtn.hidden = false;
+        setStatus('connecting', 'Connecting…');
 
-        // Show a loading shell immediately so the user gets feedback while
-        // we wait for the proxy SW to come online.
         const host = new URL(svc.url).host;
         const titleHTML = `
           <div class="cg-player-title">${escapeHtml(svc.name)}</div>
           <div class="cg-player-host">${escapeHtml(host)}</div>
+          <div class="cg-player-mode">${currentMode === 'proxy' ? 'PROXY' : 'DIRECT'}</div>
           <div style="flex:1"></div>
           <button class="is-btn is-btn-ghost is-btn-sm" data-act="cg-toggle-mode">${
             currentMode === 'proxy' ? 'Try direct' : 'Via proxy'
@@ -3196,31 +3333,19 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         stageEl.innerHTML = `
           <div class="cg-player">
             <div class="cg-player-bar">${titleHTML}</div>
-            <div class="cg-player-loading">Connecting via ${currentMode === 'proxy' ? 'proxy' : 'direct'}…</div>
+            <div class="cg-player-loading">Connecting via ${currentMode}…</div>
           </div>`;
 
-        // Wire the mode toggle right away — it works even mid-load.
+        // Wire the mode toggle right away so it works even mid-load.
         stageEl.querySelector('[data-act="cg-toggle-mode"]')?.addEventListener('click', () => {
           playService(currentSvc, currentMode === 'proxy' ? 'direct' : 'proxy');
         });
 
-        // Build the iframe src. Direct mode goes straight to the service
-        // (fast, but most cloud-gaming providers send X-Frame-Options:
-        // DENY which makes the iframe show "refused to connect"). Proxy
-        // mode routes through UV/Scramjet, which strips X-Frame-Options
-        // and frame-ancestors. WebRTC video itself goes peer-to-peer
-        // (browser ↔ NVIDIA edge over UDP/STUN/TURN) regardless of the
-        // mode — only HTTP page loads + signaling pass through proxy,
-        // which adds a small amount of latency on clicks but doesn't
-        // affect stream quality once the session starts.
+        // Build the iframe src.
         let frameSrc = svc.url;
         if (currentMode === 'proxy') {
           try {
             await waitForUV(15000);
-            // UV v3.2.10 cookie-store self-heal — silently fixes corrupt
-            // rows that would otherwise throw "r.set.getTime is not a
-            // function" inside UV's request pipeline. Cheap (one IDB
-            // read), idempotent, no-op when the store is already healthy.
             try { await OS.proxy.healCookies?.(); } catch (_) {}
             const eng = OS.proxy.engineFor(OS.proxy.getEngine());
             if (!eng || typeof eng.encodeUrl !== 'function' || typeof eng.prefix !== 'function') {
@@ -3231,9 +3356,8 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
             }
             frameSrc = eng.prefix() + eng.encodeUrl(svc.url);
           } catch (e) {
-            // Surface the failure but keep the user in the player view so
-            // they can switch to direct mode or open in a new tab.
             const player = stageEl.querySelector('.cg-player');
+            setStatus('error', 'Proxy failed');
             if (player) {
               player.innerHTML = `
                 <div class="cg-player-bar">${titleHTML}</div>
@@ -3247,8 +3371,9 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         }
 
         // Bail if the user navigated away during the await.
-        if (currentSvc !== svc || currentMode !== (mode || 'proxy')) return;
+        if (currentSvc !== svc || currentMode !== targetMode) return;
 
+        const tipsHTML = (svc.tips || []).map((t) => `<li>${escapeHtml(t)}</li>`).join('');
         stageEl.innerHTML = `
           <div class="cg-player">
             <div class="cg-player-bar">${titleHTML}</div>
@@ -3258,26 +3383,68 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
                     allowfullscreen
                     referrerpolicy="no-referrer-when-downgrade"></iframe>
             <div class="cg-fallback">
-              ${currentMode === 'proxy'
-                ? `Loading through proxy (X-Frame-Options stripped). Sign in with your own ${escapeHtml(svc.name)} account. If sign-in fails, click "Try direct" above or `
-                : `Loading directly. Most cloud-gaming services send X-Frame-Options: DENY, so this often shows "refused to connect" — use "Via proxy" above or `}<a href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">open in a new tab</a>.
+              ${tipsHTML
+                ? `<details class="cg-tips" open><summary>Tips for ${escapeHtml(svc.name)}</summary><ul>${tipsHTML}</ul></details>`
+                : ''}
+              <div class="cg-fallback-line">
+                ${currentMode === 'proxy'
+                  ? `Loading through proxy. Sign in with your own ${escapeHtml(svc.name)} account. Stream itself is peer-to-peer — proxy only adds a small click-latency hit. `
+                  : `Direct iframe. If the page is blank or shows "refused to connect," click "Via proxy" above or `}<a href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">open in a new tab</a>.
+              </div>
             </div>
           </div>`;
 
-        // Re-wire the toggle on the new render.
+        // Re-wire toggle on the new render.
         stageEl.querySelector('[data-act="cg-toggle-mode"]')?.addEventListener('click', () => {
           playService(currentSvc, currentMode === 'proxy' ? 'direct' : 'proxy');
         });
+
+        // Track iframe load + suggest mode flip if we don't see a load
+        // event within a reasonable window. We can't tell from JS whether
+        // an X-Frame-Options error page rendered (browser keeps that
+        // hidden), but the load event itself is a useful signal: if it
+        // never fires in direct mode, the iframe is silently blocked.
+        const iframe = stageEl.querySelector('.cg-player-frame');
+        let didLoad = false;
+        if (iframe) {
+          iframe.addEventListener('load', () => {
+            didLoad = true;
+            setStatus('connected', currentMode === 'proxy' ? 'Connected (via proxy)' : 'Connected (direct)');
+            // Start session timer once content loads, not before.
+            if (svc.sessionLimitMin) startTimer(svc.sessionLimitMin);
+          }, { once: true });
+        }
+        const loadTimeoutMs = currentMode === 'proxy' ? 12000 : 6000;
+        setTimeout(() => {
+          if (didLoad || currentSvc !== svc || currentMode !== targetMode) return;
+          // No load event — likely X-Frame-Options or a network issue.
+          setStatus('error', 'No response');
+          const fallback = stageEl.querySelector('.cg-fallback-line');
+          if (fallback) {
+            fallback.innerHTML = `<span style="color:#ff8a8a">Frame didn't load.</span> Try ${
+              currentMode === 'proxy' ? '<b>"Try direct"</b>' : '<b>"Via proxy"</b>'
+            } above, or <a href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">open in a new tab</a>.`;
+          }
+        }, loadTimeoutMs);
       }
 
       backBtn.addEventListener('click', () => {
         currentSvc = null;
+        currentMode = null;
         showHome();
       });
       fsBtn.addEventListener('click', () => {
         const iframe = stageEl.querySelector('.cg-player-frame');
         if (iframe && OS.enterGameFullscreen) OS.enterGameFullscreen(iframe);
       });
+      reloadBtn.addEventListener('click', () => {
+        if (currentSvc) playService(currentSvc, currentMode);
+      });
+
+      // Cleanup on app close — tear down the timer interval so it doesn't
+      // leak when the window is destroyed.
+      const closeBtn = winEl?.querySelector('.win-close');
+      closeBtn?.addEventListener('click', stopTimer, { once: true });
 
       showHome();
     },
