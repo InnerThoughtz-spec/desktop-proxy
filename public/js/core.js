@@ -1005,6 +1005,57 @@
     });
   }
 
+  // ---- Per-domain cookie wipe ----
+  // Some embed providers (vidking, vidsrc, vidlink, etc.) accumulate
+  // session/abuse-tracking cookies in UV's __op IDB. After enough plays
+  // they start refusing to serve sources to "this client." Clearing
+  // their cookies makes us look like a fresh visitor and the providers
+  // start working again — that's the symptom users describe as
+  // "movies stopped finding a server until I cleared site data."
+  // This is a targeted version of that fix: takes a list of domain
+  // suffixes, deletes any cookie row whose stored domain ends with one
+  // of them. Returns the number of rows deleted.
+  function clearUVCookies(domainSuffixes) {
+    const suffixes = (domainSuffixes || []).map((d) => String(d).toLowerCase());
+    return new Promise((resolve) => {
+      let req;
+      try { req = indexedDB.open('__op', 1); }
+      catch { return resolve(0); }
+      req.onerror = () => resolve(-1);
+      req.onblocked = () => resolve(-1);
+      req.onupgradeneeded = (e) => {
+        const db = e.target.result;
+        if (!db.objectStoreNames.contains('cookies')) {
+          db.createObjectStore('cookies', { keyPath: 'id' }).createIndex('path', 'path');
+        }
+      };
+      req.onsuccess = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('cookies')) { db.close(); return resolve(0); }
+        let tx;
+        try { tx = db.transaction(['cookies'], 'readwrite'); }
+        catch { db.close(); return resolve(-1); }
+        const store = tx.objectStore('cookies');
+        const all = store.getAll();
+        all.onsuccess = () => {
+          let removed = 0;
+          for (const c of all.result) {
+            if (!c) continue;
+            const dom = String(c.domain || '').toLowerCase().replace(/^\./, '');
+            // Empty suffix list means "wipe everything" (nuclear option).
+            const match = suffixes.length === 0
+              || suffixes.some((s) => dom === s || dom.endsWith('.' + s));
+            if (match) { store.delete(c.id); removed++; }
+          }
+          tx.oncomplete = () => { db.close(); resolve(removed); };
+          tx.onerror = () => { db.close(); resolve(-1); };
+        };
+        all.onerror = () => { db.close(); resolve(-1); };
+      };
+      setTimeout(() => resolve(-1), 2500);
+    });
+  }
+
   // ---- Boot ----
   function boot() {
     applyPerfMode();
@@ -1346,6 +1397,7 @@
       setEngine: setEngineId,
       list: () => Object.values(PROXY_ENGINES).map((e) => ({ id: e.id, label: e.label, available: e.available() })),
       healCookies: healUVCookies,
+      clearCookies: clearUVCookies,
     },
   };
   // Shorter alias used by apps.js

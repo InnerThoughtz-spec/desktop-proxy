@@ -1940,6 +1940,17 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         try { localStorage.setItem(PROVIDER_KEY, id); } catch {}
       }
 
+      // Cookie domains owned by the embed providers above. When a user
+      // clicks the Reset button (or auto-cleanup runs), we wipe these
+      // from UV's __op cookie store so the providers see a fresh client.
+      // Most "all servers fail" symptoms are abuse-tracking cookies on
+      // these domains rate-limiting the user; clearing them un-sticks
+      // the session without forcing the user to clear browser site data.
+      const STREAM_COOKIE_DOMAINS = [
+        'vidking.net', 'vidsrc.su', 'vidsrc.cc', 'vidlink.pro',
+        'autoembed.cc', '2embed.cc',
+      ];
+
       function renderPlayer(title, subtitle, type, params) {
         currentView = 'player';
         backBtn.hidden = false;
@@ -1965,6 +1976,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
                   `<option value="${p.id}"${p.id === provider.id ? ' selected' : ''}>${escapeHtml(p.label)}</option>`
                 ).join('')}
               </select>
+              <button class="is-iconbtn" data-act="player-reset" title="Reset streaming cache + reload (use if every server says no source)">⟳</button>
               <button class="is-iconbtn" data-act="player-fs" title="Fullscreen (Esc twice to exit)">⛶</button>
               <button class="is-iconbtn" data-act="player-min" title="Minimize">—</button>
               <button class="is-iconbtn" data-act="player-close" title="Close">✕</button>
@@ -1992,6 +2004,39 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           provider = next;
           const iframe = stageEl.querySelector('.is-player-frame');
           if (iframe) iframe.src = urlFor(next);
+        });
+        // Reset cache: the targeted version of "clear site data and
+        // reload." Does three things:
+        //   1. Wipes UV's __op cookies for every streaming domain (in
+        //      case any cookies survived through the proxy path).
+        //   2. Replaces the iframe with a freshly-created one — kills
+        //      any in-memory state the embed's JS was holding onto.
+        //   3. Adds a cache-buster query param so the embed's server
+        //      can't serve us a cached "no source" response.
+        // The user's existing workaround was to clear browser site data
+        // for the whole origin (which also signs them out of every
+        // proxied site). This button does the targeted equivalent.
+        stageEl.querySelector('[data-act="player-reset"]')?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          const orig = btn.textContent;
+          btn.disabled = true;
+          btn.textContent = '…';
+          try { await OS.proxy.clearCookies?.(STREAM_COOKIE_DOMAINS); } catch (_) {}
+          const oldFrame = stageEl.querySelector('.is-player-frame');
+          if (oldFrame) {
+            const newFrame = document.createElement('iframe');
+            newFrame.className = 'is-player-frame';
+            newFrame.setAttribute('allow', 'autoplay; fullscreen; encrypted-media; picture-in-picture');
+            newFrame.allowFullscreen = true;
+            newFrame.referrerPolicy = 'no-referrer';
+            newFrame.loading = 'eager';
+            const u = new URL(urlFor(provider));
+            u.searchParams.set('_cb', Date.now().toString(36));
+            newFrame.src = u.toString();
+            oldFrame.replaceWith(newFrame);
+          }
+          btn.disabled = false;
+          btn.textContent = orig;
         });
       }
 

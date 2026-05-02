@@ -253,22 +253,29 @@ function normalizeTruffled(data) {
 function normalizeSelenite(data) {
   if (!Array.isArray(data)) return [];
   const BASE = 'https://selenite.cc';
+  // Selenite reverses their resource directory names as light obfuscation:
+  // `games` is served from `/resources/semag/`, `apps` from `/resources/sppa/`.
+  // Their loader.html flips `type=g`/`type=a` to the right prefix client-side.
+  // We have to mirror that mapping or every Selenite thumbnail 404s.
+  const TYPE_TO_PREFIX = { g: 'semag', a: 'sppa' };
   return data
     .filter((g) => g && g.directory && g.name)
     .map((g) => {
       const dir = safeStr(g.directory);
       const img = safeStr(g.image);
+      const type = 'g';
+      const prefix = TYPE_TO_PREFIX[type];
       const params = new URLSearchParams({
         title: g.name,
         dir,
         img: img,
-        type: 'g',
+        type,
       });
       return {
         id: 'sel-' + dir,
         name: safeStr(g.name),
         source: 'Selenite',
-        thumb: img ? `${BASE}/resources/games/${dir}/${img}` : '',
+        thumb: img ? `${BASE}/resources/${prefix}/${dir}/${img}` : '',
         url: `${BASE}/loader.html?${params.toString()}`,
       };
     });
