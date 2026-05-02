@@ -10,14 +10,15 @@
     accent2: '#b28aff',
     // wallpaper: { kind: 'preset'|'image'|'gif'|'video'|'url'|'server', value: <key|wpId|url|serverId>, meta? }
     wallpaper: { kind: 'preset', value: 'rainDusk' },
-    pinned: ['browser', 'inner-movies', 'inner-arcade', 'inntify', 'files', 'settings', 'about'],
+    pinned: ['browser', 'inner-movies', 'inner-arcade', 'inntify', 'cloud-gaming', 'files', 'settings', 'about'],
     // Desktop icons: [{ id, appId, x, y }]
     desktopIcons: [
-      { id: 'di_browser', appId: 'browser',      x: 24, y: 88 },
-      { id: 'di_movies',  appId: 'inner-movies', x: 24, y: 200 },
-      { id: 'di_arcade',  appId: 'inner-arcade', x: 24, y: 312 },
-      { id: 'di_inntify', appId: 'inntify',      x: 24, y: 424 },
-      { id: 'di_files',   appId: 'files',        x: 24, y: 536 },
+      { id: 'di_browser', appId: 'browser',       x: 24, y: 88 },
+      { id: 'di_movies',  appId: 'inner-movies',  x: 24, y: 200 },
+      { id: 'di_arcade',  appId: 'inner-arcade',  x: 24, y: 312 },
+      { id: 'di_inntify', appId: 'inntify',       x: 24, y: 424 },
+      { id: 'di_cloud',   appId: 'cloud-gaming',  x: 24, y: 536 },
+      { id: 'di_files',   appId: 'files',         x: 24, y: 648 },
     ],
     locked: true,
     fpsVisible: true,
@@ -141,13 +142,20 @@
       // Rename: 'inner-stream' → 'inner-movies' (preserves position).
       const sIdx = merged.pinned.indexOf('inner-stream');
       if (sIdx >= 0) merged.pinned[sIdx] = 'inner-movies';
-      for (const id of ['inner-movies', 'inner-arcade', 'inntify']) {
+      for (const id of ['inner-movies', 'inner-arcade', 'inntify', 'cloud-gaming']) {
         if (!merged.pinned.includes(id)) merged.pinned.push(id);
       }
       // Same rename in desktopIcons for users that pinned the old icon.
       if (Array.isArray(merged.desktopIcons)) {
         for (const it of merged.desktopIcons) {
           if (it.appId === 'inner-stream') it.appId = 'inner-movies';
+        }
+        // Add cloud-gaming desktop icon for users who already have state saved.
+        if (!merged.desktopIcons.some((i) => i.appId === 'cloud-gaming')) {
+          // Find a y slot just below the lowest existing icon in column x=24.
+          const col = merged.desktopIcons.filter((i) => i.x === 24);
+          const maxY = col.reduce((m, i) => Math.max(m, i.y || 0), 88);
+          merged.desktopIcons.push({ id: 'di_cloud', appId: 'cloud-gaming', x: 24, y: maxY + 112 });
         }
       }
       return merged;

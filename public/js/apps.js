@@ -96,12 +96,12 @@
         <path d="M28 42 V18 L49 14 V36" fill="none" stroke="url(#tg)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
       </svg>`);
   const BRAND_PRESETS = [
-    { slug: 'inner-movies', name: 'InnerMovies', appId: 'inner-movies', iconURL: INNER_MOVIES_DATA_URI },
-    { slug: 'inner-arcade', name: 'InnerArcade', appId: 'inner-arcade', iconURL: INNER_ARCADE_DATA_URI },
-    { slug: 'inntify',      name: 'Inntify',     appId: 'inntify',      iconURL: INNTIFY_DATA_URI },
+    { slug: 'inner-movies',  name: 'InnerMovies',  appId: 'inner-movies',  iconURL: 'https://cdn.simpleicons.org/netflix/E50914' },
+    { slug: 'inner-arcade',  name: 'InnerArcade',  appId: 'inner-arcade',  iconURL: 'https://cdn.simpleicons.org/playstation/FFFFFF' },
+    { slug: 'inntify',       name: 'Inntify',      appId: 'inntify',       iconURL: 'https://cdn.simpleicons.org/spotify/1DB954' },
+    { slug: 'cloud-gaming',  name: 'Cloud Gaming', appId: 'cloud-gaming',  iconURL: 'https://cdn.simpleicons.org/nvidia/76B900' },
     { slug: 'youtube',     name: 'YouTube',     url: 'https://www.youtube.com/',          color: 'FF0000' },
     { slug: 'discord',     name: 'Discord',     url: 'https://discord.com/app',           color: '5865F2' },
-    { slug: 'nvidia',      name: 'GeForce NOW', url: 'https://play.geforcenow.com/',      color: '76B900' },
     { slug: 'github',      name: 'GitHub',      url: 'https://github.com/',               color: 'FFFFFF' },
     { slug: 'google',      name: 'Google',      url: 'https://www.google.com/',           color: '4285F4' },
     { slug: 'wikipedia',   name: 'Wikipedia',   url: 'https://www.wikipedia.org/',        color: 'FFFFFF' },
@@ -1618,7 +1618,10 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
   // The first paint is a black, neon-glow splash that says the app's name.
   OS.registerApp('inner-movies', {
     title: 'InnerMovies',
-    glyphSVG: SVG.movies,
+    // Branded dock icon (Netflix red). Falls back to a letter avatar if
+    // the simpleicons CDN is blocked (school filters, etc.) — see
+    // applyGlyph in core.js for the onerror handler.
+    glyphURL: 'https://cdn.simpleicons.org/netflix/E50914',
     singleInstance: true,
     defaultW: 1180, defaultH: 760,
     mount(root) {
@@ -2081,7 +2084,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
   // Same neon-splash effect as InnerStream, different name + accent.
   OS.registerApp('inner-arcade', {
     title: 'InnerArcade',
-    glyphSVG: SVG.arcade,
+    glyphURL: 'https://cdn.simpleicons.org/playstation/FFFFFF',
     singleInstance: true,
     defaultW: 1180, defaultH: 760,
     mount(root) {
@@ -2473,7 +2476,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
   // /api/music/* in server.js).
   OS.registerApp('inntify', {
     title: 'Inntify',
-    glyphSVG: SVG.music,
+    glyphURL: 'https://cdn.simpleicons.org/spotify/1DB954',
     singleInstance: true,
     defaultW: 1120, defaultH: 720,
     mount(root) {
@@ -3061,6 +3064,149 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
     const sec = s % 60;
     return `${m}:${sec < 10 ? '0' + sec : sec}`;
   }
+
+  // ---------- Cloud Gaming ----------
+  // Launcher for real cloud gaming services (GeForce NOW, Xbox Cloud,
+  // Boosteroid, Now.gg). The actual games run on the cloud provider's
+  // GPU servers and stream the video back over WebRTC; we just iframe
+  // the service. Important: cloud streaming needs a direct connection
+  // for low-latency video, so the iframe goes DIRECT (not through
+  // UV/Scramjet) — the proxy would add fatal latency and break WebRTC.
+  // Users sign in with their own accounts; queue/ad/time-limit policies
+  // are whatever each service grants their user tier.
+  OS.registerApp('cloud-gaming', {
+    title: 'Cloud Gaming',
+    glyphURL: 'https://cdn.simpleicons.org/nvidia/76B900',
+    singleInstance: true,
+    defaultW: 1180, defaultH: 760,
+    mount(root) {
+      const SERVICES = [
+        {
+          id: 'gfn',
+          name: 'GeForce NOW',
+          tagline: "Bring your Steam / Epic / Rockstar / Ubisoft library. Free tier has a queue + 1-hour sessions; Priority is $9.99/mo.",
+          url: 'https://play.geforcenow.com/',
+          logo: 'https://cdn.simpleicons.org/nvidia/76B900',
+          accent: '#76B900',
+        },
+        {
+          id: 'xbox',
+          name: 'Xbox Cloud Gaming',
+          tagline: 'Hundreds of games via Xbox Game Pass Ultimate ($14.99/mo). No queue.',
+          url: 'https://www.xbox.com/play',
+          logo: 'https://cdn.simpleicons.org/xbox/107C10',
+          accent: '#107C10',
+        },
+        {
+          id: 'boosteroid',
+          name: 'Boosteroid',
+          tagline: 'Subscription-based ($7.99/mo), no queue, includes GTA V.',
+          url: 'https://cloud.boosteroid.com/',
+          logo: '',
+          accent: '#9146FF',
+        },
+        {
+          id: 'nowgg',
+          name: 'Now.gg',
+          tagline: 'Free Android-game cloud — Roblox, mobile titles. Instant launch, no install.',
+          url: 'https://now.gg/',
+          logo: '',
+          accent: '#008CCF',
+        },
+      ];
+
+      root.innerHTML = `
+        <div class="cg-app">
+          <div class="cg-topbar" data-drag-handle>
+            <button class="is-iconbtn" data-act="cg-back" hidden title="Back to launcher">‹</button>
+            <div class="cg-wordmark">Cloud<b>Gaming</b></div>
+            <div style="flex:1"></div>
+            <button class="is-iconbtn" data-act="cg-fs" title="Fullscreen (Esc twice to exit)" hidden>⛶</button>
+            <button class="is-iconbtn" data-act="cg-min" title="Minimize">—</button>
+            <button class="is-iconbtn" data-act="cg-close" title="Close">✕</button>
+          </div>
+          <div class="cg-stage" data-role="stage"></div>
+        </div>`;
+
+      const stageEl  = root.querySelector('[data-role="stage"]');
+      const backBtn  = root.querySelector('[data-act="cg-back"]');
+      const fsBtn    = root.querySelector('[data-act="cg-fs"]');
+      const winEl    = root.closest('.win');
+
+      root.querySelector('[data-act="cg-min"]')?.addEventListener('click', () => {
+        winEl?.querySelector('.win-min')?.click();
+      });
+      root.querySelector('[data-act="cg-close"]')?.addEventListener('click', () => {
+        winEl?.querySelector('.win-close')?.click();
+      });
+
+      function showHome() {
+        backBtn.hidden = true;
+        fsBtn.hidden = true;
+        stageEl.innerHTML = `
+          <div class="cg-grid">
+            ${SERVICES.map((s) => `
+              <button class="cg-tile" data-launch="${s.id}" style="--cg-accent:${s.accent}">
+                <div class="cg-tile-logo">
+                  ${s.logo
+                    ? `<img src="${escapeHtml(s.logo)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cg-tile-logo-fallback',textContent:'${escapeHtml(s.name.charAt(0))}'}))">`
+                    : `<div class="cg-tile-logo-fallback">${escapeHtml(s.name.charAt(0))}</div>`}
+                </div>
+                <div class="cg-tile-name">${escapeHtml(s.name)}</div>
+                <div class="cg-tile-tagline">${escapeHtml(s.tagline)}</div>
+                <span class="cg-tile-cta">Launch ›</span>
+              </button>
+            `).join('')}
+          </div>
+          <div class="cg-note">
+            <strong>How this works:</strong> the actual games run on each service's GPU servers; your browser receives a video stream over WebRTC. You sign in with your own account on each platform — Inner-OS doesn't host the games or relay the streams. Cloud-gaming services need a direct connection for low-latency video, so they bypass the desktop's UV/Scramjet proxy.
+          </div>`;
+        stageEl.querySelectorAll('[data-launch]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const svc = SERVICES.find((s) => s.id === btn.dataset.launch);
+            if (svc) playService(svc);
+          });
+        });
+      }
+
+      function playService(svc) {
+        backBtn.hidden = false;
+        fsBtn.hidden = false;
+        // Important: src goes DIRECT to the service, NOT through proxy.
+        // Cloud gaming needs WebRTC + low latency; routing through bare-
+        // server-node would add 50-200ms RTT and break the streaming
+        // handshake. The trade-off is that the service's own X-Frame-
+        // Options / CSP frame-ancestors decides whether iframing works
+        // — most cloud-gaming providers allow it, but if it doesn't, the
+        // "Open in new tab" link below the iframe always works.
+        stageEl.innerHTML = `
+          <div class="cg-player">
+            <div class="cg-player-bar">
+              <div class="cg-player-title">${escapeHtml(svc.name)}</div>
+              <div class="cg-player-host">${escapeHtml(new URL(svc.url).host)}</div>
+              <div style="flex:1"></div>
+              <a class="is-btn is-btn-ghost is-btn-sm" href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">Open in new tab ↗</a>
+            </div>
+            <iframe class="cg-player-frame"
+                    src="${escapeHtml(svc.url)}"
+                    allow="autoplay; fullscreen; gamepad; pointer-lock; clipboard-read; clipboard-write; encrypted-media; cross-origin-isolated; display-capture; web-share; xr-spatial-tracking"
+                    allowfullscreen
+                    referrerpolicy="no-referrer-when-downgrade"></iframe>
+            <div class="cg-fallback">
+              If the page is blank for more than ~10 seconds, the service is refusing to be iframed. Use <a href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">Open in new tab</a> instead — Inner-OS doesn't add value to the streaming session itself.
+            </div>
+          </div>`;
+      }
+
+      backBtn.addEventListener('click', showHome);
+      fsBtn.addEventListener('click', () => {
+        const iframe = stageEl.querySelector('.cg-player-frame');
+        if (iframe && OS.enterGameFullscreen) OS.enterGameFullscreen(iframe);
+      });
+
+      showHome();
+    },
+  });
 
   // ---------- About ----------
   OS.registerApp('about', {

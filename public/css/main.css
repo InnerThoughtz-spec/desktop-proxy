@@ -2112,3 +2112,156 @@ input, textarea { font: inherit; color: inherit; }
   .it-pl-hero { grid-template-columns: 1fr; }
   .it-pl-cover { width: 140px; height: 140px; }
 }
+
+/* ===========================================================================
+   Cloud Gaming — launcher for real cloud-streaming services. The iframe
+   inside .cg-player-frame goes DIRECT (not through UV/Scramjet) because
+   WebRTC needs low latency. CSS just provides the tile grid and a small
+   chrome bar over the streamed player. Accent color is NVIDIA green to
+   match the GeForce NOW brand mark used in the dock glyph. */
+
+.cg-app {
+  position: absolute; inset: 0;
+  background: #07090d;
+  color: #e8ecf1;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.cg-app * { box-sizing: border-box; }
+
+.cg-topbar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: linear-gradient(to bottom, rgba(7,9,13,.95), rgba(7,9,13,.6) 70%, rgba(7,9,13,0));
+  position: sticky; top: 0; z-index: 4;
+}
+.cg-wordmark {
+  font-weight: 700; font-size: 18px; letter-spacing: .02em;
+  color: #fff;
+  text-shadow: 0 0 10px rgba(118,185,0,.5), 0 0 22px rgba(118,185,0,.25);
+}
+.cg-wordmark b { color: #76B900; font-weight: 800; }
+
+.cg-stage {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 16px 24px 24px;
+}
+
+.cg-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.cg-tile {
+  --cg-accent: #76B900;
+  position: relative;
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 10px;
+  text-align: left;
+  padding: 18px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.08);
+  color: #fff;
+  cursor: pointer;
+  transition: transform .14s var(--ease), border-color .15s var(--ease),
+              box-shadow .15s var(--ease), background .15s var(--ease);
+}
+.cg-tile:hover,
+.cg-tile:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--cg-accent);
+  background: rgba(255,255,255,.07);
+  box-shadow: 0 10px 28px rgba(0,0,0,.45),
+              0 0 0 1px color-mix(in srgb, var(--cg-accent) 35%, transparent),
+              0 0 24px color-mix(in srgb, var(--cg-accent) 30%, transparent);
+  outline: none;
+}
+.cg-tile-logo {
+  width: 56px; height: 56px;
+  border-radius: 12px;
+  background: rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(255,255,255,.06);
+  overflow: hidden;
+}
+.cg-tile-logo img {
+  width: 36px; height: 36px;
+  object-fit: contain;
+}
+.cg-tile-logo-fallback {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; font-weight: 800;
+  color: var(--cg-accent);
+  background: rgba(255,255,255,.04);
+}
+.cg-tile-name {
+  font-size: 16px; font-weight: 700;
+  color: #fff;
+}
+.cg-tile-tagline {
+  font-size: 12.5px; line-height: 1.45;
+  color: rgba(255,255,255,.66);
+}
+.cg-tile-cta {
+  margin-top: auto;
+  font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--cg-accent);
+  font-weight: 700;
+}
+
+.cg-note {
+  font-size: 12.5px; line-height: 1.55;
+  color: rgba(255,255,255,.6);
+  background: rgba(255,255,255,.03);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+.cg-note strong { color: #fff; }
+
+/* Player view (iframe to the actual streaming service) */
+.cg-player {
+  position: absolute; inset: 0;
+  background: #000;
+  display: flex; flex-direction: column;
+}
+.cg-player-bar {
+  flex: 0 0 auto;
+  display: flex; align-items: center; gap: 14px;
+  padding: 8px 14px;
+  background: rgba(7,9,13,.85);
+  border-bottom: 1px solid rgba(255,255,255,.06);
+  font-size: 13px;
+}
+.cg-player-title { font-weight: 700; color: #fff; }
+.cg-player-host {
+  font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  color: rgba(118,185,0,.8);
+}
+.cg-player-frame {
+  flex: 1 1 auto;
+  width: 100%;
+  border: 0;
+  background: #000;
+}
+.cg-fallback {
+  flex: 0 0 auto;
+  padding: 8px 14px;
+  font-size: 11.5px; line-height: 1.45;
+  color: rgba(255,255,255,.55);
+  background: rgba(7,9,13,.85);
+  border-top: 1px solid rgba(255,255,255,.06);
+}
+.cg-fallback a { color: #76B900; text-decoration: none; }
+.cg-fallback a:hover { text-decoration: underline; }
+
+@media (max-width: 760px) {
+  .cg-grid { grid-template-columns: 1fr; }
+  .cg-stage { padding: 12px 14px 18px; }
+}
