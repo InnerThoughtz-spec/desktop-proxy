@@ -3169,36 +3169,106 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         });
       }
 
-      function playService(svc) {
+      // Track which mode each service is currently mounted with so the
+      // "Try direct" / "Try via proxy" toggle can flip without losing the
+      // svc reference. mode: 'proxy' | 'direct'.
+      let currentSvc = null;
+      let currentMode = 'proxy';
+
+      async function playService(svc, mode) {
+        currentSvc = svc;
+        currentMode = mode || 'proxy';
         backBtn.hidden = false;
         fsBtn.hidden = false;
-        // Important: src goes DIRECT to the service, NOT through proxy.
-        // Cloud gaming needs WebRTC + low latency; routing through bare-
-        // server-node would add 50-200ms RTT and break the streaming
-        // handshake. The trade-off is that the service's own X-Frame-
-        // Options / CSP frame-ancestors decides whether iframing works
-        // — most cloud-gaming providers allow it, but if it doesn't, the
-        // "Open in new tab" link below the iframe always works.
+
+        // Show a loading shell immediately so the user gets feedback while
+        // we wait for the proxy SW to come online.
+        const host = new URL(svc.url).host;
+        const titleHTML = `
+          <div class="cg-player-title">${escapeHtml(svc.name)}</div>
+          <div class="cg-player-host">${escapeHtml(host)}</div>
+          <div style="flex:1"></div>
+          <button class="is-btn is-btn-ghost is-btn-sm" data-act="cg-toggle-mode">${
+            currentMode === 'proxy' ? 'Try direct' : 'Via proxy'
+          }</button>
+          <a class="is-btn is-btn-ghost is-btn-sm" href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">Open in new tab ↗</a>`;
+
         stageEl.innerHTML = `
           <div class="cg-player">
-            <div class="cg-player-bar">
-              <div class="cg-player-title">${escapeHtml(svc.name)}</div>
-              <div class="cg-player-host">${escapeHtml(new URL(svc.url).host)}</div>
-              <div style="flex:1"></div>
-              <a class="is-btn is-btn-ghost is-btn-sm" href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">Open in new tab ↗</a>
-            </div>
+            <div class="cg-player-bar">${titleHTML}</div>
+            <div class="cg-player-loading">Connecting via ${currentMode === 'proxy' ? 'proxy' : 'direct'}…</div>
+          </div>`;
+
+        // Wire the mode toggle right away — it works even mid-load.
+        stageEl.querySelector('[data-act="cg-toggle-mode"]')?.addEventListener('click', () => {
+          playService(currentSvc, currentMode === 'proxy' ? 'direct' : 'proxy');
+        });
+
+        // Build the iframe src. Direct mode goes straight to the service
+        // (fast, but most cloud-gaming providers send X-Frame-Options:
+        // DENY which makes the iframe show "refused to connect"). Proxy
+        // mode routes through UV/Scramjet, which strips X-Frame-Options
+        // and frame-ancestors. WebRTC video itself goes peer-to-peer
+        // (browser ↔ NVIDIA edge over UDP/STUN/TURN) regardless of the
+        // mode — only HTTP page loads + signaling pass through proxy,
+        // which adds a small amount of latency on clicks but doesn't
+        // affect stream quality once the session starts.
+        let frameSrc = svc.url;
+        if (currentMode === 'proxy') {
+          try {
+            await waitForUV(15000);
+            const eng = OS.proxy.engineFor(OS.proxy.getEngine());
+            if (!eng || typeof eng.encodeUrl !== 'function' || typeof eng.prefix !== 'function') {
+              throw new Error('proxy engine not available');
+            }
+            if (typeof eng.available === 'function' && !eng.available()) {
+              throw new Error(`${eng.label || 'Proxy'} engine not loaded yet — try again in a moment, or switch engines in Settings → Proxy.`);
+            }
+            frameSrc = eng.prefix() + eng.encodeUrl(svc.url);
+          } catch (e) {
+            // Surface the failure but keep the user in the player view so
+            // they can switch to direct mode or open in a new tab.
+            const player = stageEl.querySelector('.cg-player');
+            if (player) {
+              player.innerHTML = `
+                <div class="cg-player-bar">${titleHTML}</div>
+                <div class="cg-player-loading" style="color:#ff8a8a">Proxy unavailable: ${escapeHtml(String(e.message || e))}<br>Try the "Try direct" button above, or open in a new tab.</div>`;
+              player.querySelector('[data-act="cg-toggle-mode"]')?.addEventListener('click', () => {
+                playService(currentSvc, currentMode === 'proxy' ? 'direct' : 'proxy');
+              });
+            }
+            return;
+          }
+        }
+
+        // Bail if the user navigated away during the await.
+        if (currentSvc !== svc || currentMode !== (mode || 'proxy')) return;
+
+        stageEl.innerHTML = `
+          <div class="cg-player">
+            <div class="cg-player-bar">${titleHTML}</div>
             <iframe class="cg-player-frame"
-                    src="${escapeHtml(svc.url)}"
+                    src="${escapeHtml(frameSrc)}"
                     allow="autoplay; fullscreen; gamepad; pointer-lock; clipboard-read; clipboard-write; encrypted-media; cross-origin-isolated; display-capture; web-share; xr-spatial-tracking"
                     allowfullscreen
                     referrerpolicy="no-referrer-when-downgrade"></iframe>
             <div class="cg-fallback">
-              If the page is blank for more than ~10 seconds, the service is refusing to be iframed. Use <a href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">Open in new tab</a> instead — Inner-OS doesn't add value to the streaming session itself.
+              ${currentMode === 'proxy'
+                ? `Loading through proxy (X-Frame-Options stripped). Sign in with your own ${escapeHtml(svc.name)} account. If sign-in fails, click "Try direct" above or `
+                : `Loading directly. Most cloud-gaming services send X-Frame-Options: DENY, so this often shows "refused to connect" — use "Via proxy" above or `}<a href="${escapeHtml(svc.url)}" target="_blank" rel="noopener">open in a new tab</a>.
             </div>
           </div>`;
+
+        // Re-wire the toggle on the new render.
+        stageEl.querySelector('[data-act="cg-toggle-mode"]')?.addEventListener('click', () => {
+          playService(currentSvc, currentMode === 'proxy' ? 'direct' : 'proxy');
+        });
       }
 
-      backBtn.addEventListener('click', showHome);
+      backBtn.addEventListener('click', () => {
+        currentSvc = null;
+        showHome();
+      });
       fsBtn.addEventListener('click', () => {
         const iframe = stageEl.querySelector('.cg-player-frame');
         if (iframe && OS.enterGameFullscreen) OS.enterGameFullscreen(iframe);

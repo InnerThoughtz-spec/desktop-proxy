@@ -2250,6 +2250,16 @@ input, textarea { font: inherit; color: inherit; }
   border: 0;
   background: #000;
 }
+.cg-player-loading {
+  flex: 1 1 auto;
+  display: flex; align-items: center; justify-content: center;
+  text-align: center;
+  padding: 24px;
+  font-size: 13px;
+  color: rgba(255,255,255,.7);
+  background: #07090d;
+  line-height: 1.5;
+}
 .cg-fallback {
   flex: 0 0 auto;
   padding: 8px 14px;
