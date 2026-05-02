@@ -119,13 +119,34 @@
       // adds the Origin/Referer that googlevideo requires.
       a.src = `/api/music/stream/${encodeURIComponent(track.id)}`;
       // If the audio element fails to load the stream URL, surface it.
-      const onErr = () => {
+      // Code 4 (format error) usually means the response body wasn't audio
+      // — typically a 502 HTML/JSON error from /api/music/stream. Fetch
+      // the same URL directly to read the server's JSON error and show
+      // the real reason ("YouTube blocking cloud IP, set YT_COOKIE", etc).
+      const onErr = async () => {
         if (myToken !== loadToken) return;
         const code = a.error?.code;
-        const msg = code === 4 ? 'audio format not supported by browser'
-                  : code === 3 ? 'audio decode error'
-                  : code === 2 ? 'network error fetching audio'
-                  : 'audio failed to load';
+        let msg = code === 4 ? 'audio format not supported by browser'
+                : code === 3 ? 'audio decode error'
+                : code === 2 ? 'network error fetching audio'
+                :              'audio failed to load';
+        // Code 4 with a 502 from our proxy is the common case — try to
+        // read the structured error body for a clearer message.
+        if (code === 4 || code === 2) {
+          try {
+            const probe = await fetch(a.src, { method: 'GET', headers: { range: 'bytes=0-1' } });
+            if (probe.status >= 400) {
+              const j = await probe.json().catch(() => null);
+              if (j) {
+                if (j.hint) msg = j.hint;
+                else if (j.detail) msg = `Music server: ${j.detail}`;
+                else if (j.error) msg = `Music server: ${j.error}`;
+              } else {
+                msg = `Music server returned HTTP ${probe.status}`;
+              }
+            }
+          } catch (_) { /* keep the generic msg */ }
+        }
         lastError = msg;
         console.warn('[Inntify] audio error:', msg, 'url:', a.src);
         emit();

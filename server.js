@@ -651,7 +651,7 @@ const STREAM_URL_TTL = 4 * 60 * 1000; // googlevideo URLs typically stay valid ~
 // metadata-only or empty streaming_data to common clients; ANDROID_VR
 // is the most reliable but isn't always granted, so fall through to a
 // few alternatives before giving up. Returns { info, formats, client }.
-const STREAM_CLIENTS = ['ANDROID_VR', 'IOS', 'ANDROID', 'TV_EMBEDDED', 'WEB'];
+const STREAM_CLIENTS = ['ANDROID_VR', 'IOS', 'ANDROID', 'TV_EMBEDDED', 'WEB', 'MWEB', 'TVHTML5_SIMPLY_EMBEDDED_PLAYER', 'WEB_EMBEDDED_PLAYER'];
 async function getInfoWithFormats(yt, id, clients = STREAM_CLIENTS) {
   let lastErr = null;
   for (const client of clients) {
@@ -742,7 +742,23 @@ app.get('/api/music/stream/:id', async (req, res) => {
     return pipeUpstream(upstream, res, mime);
   } catch (e) {
     console.error('[music/stream]', e.message);
-    if (!res.headersSent) res.status(502).end();
+    if (!res.headersSent) {
+      // Surface the real error to the browser so DevTools shows what's
+      // wrong instead of a silent 502. The most common root cause is
+      // YouTube refusing cloud IPs without cookie auth — detect that
+      // pattern and add a hint to the response so the user knows what
+      // to fix.
+      const msg = String(e.message || '');
+      const isAuthIssue = /empty_streaming_data|This video is unavailable|all clients exhausted/i.test(msg);
+      res.status(502).json({
+        error: 'stream_unavailable',
+        detail: msg.slice(0, 240),
+        hint: isAuthIssue
+          ? 'YouTube is refusing this server\'s IP. Set YT_COOKIE (and optionally YT_VISITOR_DATA) env vars on the host. See /api/music/status?probe=1 for per-client diagnostics.'
+          : null,
+        authStatus: ytAuthSummary(),
+      });
+    }
   }
 });
 
