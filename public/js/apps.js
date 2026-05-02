@@ -3089,6 +3089,72 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       //   tier           — 'free' | 'paid' | 'mixed' badge on the tile.
       //   tips           — short bullets shown under the player iframe.
       const SERVICES = [
+        // ----- Earn-time / free-trial services. These are the platforms
+        // that show up on TikTok demos with "GTA V free, no time limit"
+        // claims. Reality: each has a daily free-time bucket (typically
+        // 60 min) that can be extended by completing tasks, watching
+        // ads, or referring friends. They're more iframe-permissive than
+        // GFN/Xbox so the proxy path usually works. Catalogs operate in
+        // legal grey areas and individual titles can vanish overnight
+        // when publishers send DMCAs. -----
+        {
+          id: 'joyark',
+          name: 'JoyArk',
+          tagline: 'Free with daily play time + earn-more tasks. GTA V is the headline title. The most TikTok-popular cloud platform. Datacenters in Asia (~150-200ms RTT from NA).',
+          url: 'https://web.joyark.com/',
+          logo: '',
+          accent: '#00B4D8',
+          tier: 'mixed',
+          // JoyArk is more iframe-permissive than the big paid services
+          // — try direct first, fall back to proxy if it blocks.
+          defaultMode: 'direct',
+          sessionLimitMin: 60,
+          tips: [
+            'Daily free-time bucket (~60 min) — extend by watching ads, daily login, referring friends',
+            'GTA V is on the catalog but can be removed without notice (DMCA risk)',
+            'Sign up with email; phone verification is optional in most regions',
+            'Latency: 150-200ms from North America. Playable, not GFN-quality',
+            'TikTok creators promote it via referral links — bonus minutes for both sides',
+          ],
+        },
+        {
+          id: 'cato',
+          name: 'CATO Cloud',
+          tagline: 'Singapore-based. Free trial with no payment method required. AAA catalog including GTA V, Fortnite, Cyberpunk.',
+          url: 'https://www.catogames.com/',
+          logo: '',
+          accent: '#FF6B35',
+          tier: 'mixed',
+          defaultMode: 'direct',
+          sessionLimitMin: 30,
+          tips: [
+            'New users get a free trial — no credit card needed up front',
+            'Time-based: queues exist despite marketing claims',
+            'Catalog rotates; check before signing up if you need a specific title',
+            'Cleaner sign-up flow than JoyArk (no Chinese phone verification)',
+          ],
+        },
+        {
+          id: 'netboom',
+          name: 'NetBoom',
+          tagline: 'Mobile-focused cloud gaming. GTA 5, Fortnite, FIFA. Coin/gems economy — earn free play time or buy.',
+          url: 'https://www.netboom.com/',
+          logo: '',
+          accent: '#FFB800',
+          tier: 'mixed',
+          defaultMode: 'direct',
+          sessionLimitMin: 30,
+          tips: [
+            'Originally Android-only — web access works but is less polished',
+            'Free play funded by coins; earn via daily login, ads, achievements',
+            'Best on mobile with touch controls; controller support is patchy on web',
+          ],
+        },
+        // ----- Major paid streaming services (require a sub or
+        // subscription account). Iframe behavior varies — most refuse
+        // and need proxy, some still won't work even with proxy because
+        // their auth flow checks origin. The "Open in new tab" link is
+        // the always-works escape hatch. -----
         {
           id: 'gfn',
           name: 'GeForce NOW',
@@ -3295,6 +3361,8 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           </div>
           <div class="cg-note">
             <strong>How this works:</strong> the actual games run on each service's GPU servers; your browser receives a video stream over WebRTC peer-to-peer. You sign in with your own account on each platform — Inner-OS doesn't host games or relay streams. Most providers refuse iframing, so the launcher loads them through the desktop's UV proxy, which strips <code>X-Frame-Options</code>. Stream latency is unaffected by the proxy because WebRTC bypasses it.
+            <br><br>
+            <strong>Two categories above:</strong> the first three (JoyArk, CATO, NetBoom) are free-with-daily-time services — best fit for "play GTA V right now without a sub." Daily free time is ~30-60 min; extend by completing tasks. The rest (GeForce NOW, Xbox, Boosteroid, Luna, Shadow) are subscription-based and offer better stream quality + bigger catalogs.
           </div>`;
         stageEl.querySelectorAll('[data-launch]').forEach((btn) => {
           btn.addEventListener('click', () => {
