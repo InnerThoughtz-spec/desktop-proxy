@@ -340,6 +340,238 @@ function ytAuthSummary() {
     hasVisitorData: !!YT_VISITOR_DATA,
   };
 }
+
+// ---------- Piped / Invidious backend chain ----------
+// YouTube refuses to issue stream URLs to data-center IPs (Oracle, Fly, etc.)
+// even with valid cookie auth — they require a po_token from BotGuard JS
+// challenges that data-center IPs can't generate. The workaround:
+// public Piped/Invidious instances run on residential-friendly IPs and
+// expose REST APIs that return ready-to-stream googlevideo URLs.
+//
+// We try a list of Piped instances first (their API is more uniform),
+// fall back to Invidious instances, and finally fall back to youtubei.js
+// (which runs locally — preserves the code path for users running on a
+// residential IP). On each request we cycle through instances until one
+// returns valid audio formats.
+//
+// Instance lists are overridable via env vars so the user can curate
+// their own list as instances die / new ones come online.
+const DEFAULT_PIPED = [
+  'https://pipedapi.kavin.rocks',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.r4fo.com',
+  'https://pipedapi.smnz.de',
+  'https://pipedapi.tokhmi.xyz',
+  'https://piped-api.privacy.com.de',
+  'https://piped-api.lunar.icu',
+  'https://api.piped.yt',
+];
+const DEFAULT_INVIDIOUS = [
+  'https://inv.nadeko.net',
+  'https://invidious.fdn.fr',
+  'https://yewtu.be',
+  'https://invidious.privacyredirect.com',
+];
+function parseList(s, fallback) {
+  if (!s) return fallback;
+  return String(s).split(',').map((x) => x.trim()).filter(Boolean);
+}
+const PIPED_INSTANCES     = parseList(process.env.PIPED_INSTANCES,     DEFAULT_PIPED);
+const INVIDIOUS_INSTANCES = parseList(process.env.INVIDIOUS_INSTANCES, DEFAULT_INVIDIOUS);
+// Per-instance health tracking — penalize instances that just failed so we
+// don't keep hammering a dead one for every request. After ~30s of cooldown
+// we give it another chance.
+const INSTANCE_HEALTH_TTL = 30 * 1000;
+const instanceHealth = new Map(); // base -> { failedAt }
+function isInstanceUnhealthy(base) {
+  const h = instanceHealth.get(base);
+  return h && (Date.now() - h.failedAt) < INSTANCE_HEALTH_TTL;
+}
+function markInstance(base, ok) {
+  if (ok) instanceHealth.delete(base);
+  else instanceHealth.set(base, { failedAt: Date.now() });
+}
+async function fetchJSONInstance(base, path, timeoutMs = 8000) {
+  if (isInstanceUnhealthy(base)) throw new Error(`${base}: unhealthy (cooldown)`);
+  const url = `${base}${path}`;
+  const r = await fetch(url, {
+    signal: AbortSignal.timeout(timeoutMs),
+    headers: { 'user-agent': 'Mozilla/5.0', 'accept': 'application/json' },
+  });
+  if (!r.ok) throw new Error(`${base}: HTTP ${r.status}`);
+  return r.json();
+}
+
+async function pipedGetTrack(id) {
+  let lastErr = null;
+  for (const base of PIPED_INSTANCES) {
+    try {
+      const data = await fetchJSONInstance(base, `/streams/${encodeURIComponent(id)}`);
+      const audio = (data.audioStreams || [])
+        .filter((s) => s.url && /audio\//.test(s.mimeType || ''))
+        .sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+      if (!audio) throw new Error(`${base}: no audio`);
+      markInstance(base, true);
+      return {
+        backend: 'piped',
+        instance: base,
+        title: data.title || '',
+        uploader: data.uploader || data.uploaderName || '',
+        duration: data.duration || 0,
+        thumbnailUrl: data.thumbnailUrl || '',
+        url: audio.url,
+        mime: (audio.mimeType || 'audio/mp4').split(';')[0].trim(),
+        contentLength: audio.contentLength ? parseInt(audio.contentLength, 10) : 0,
+        // Surface the alternative audio streams so /api/music/track has
+        // something to put in `audioStreams` — keeps API shape stable.
+        audioStreams: (data.audioStreams || []).map((s) => ({
+          url: s.url, mimeType: s.mimeType, bitrate: s.bitrate || 0, itag: s.itag,
+        })),
+      };
+    } catch (e) {
+      markInstance(base, false);
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('all piped instances failed');
+}
+
+async function invidiousGetTrack(id) {
+  let lastErr = null;
+  for (const base of INVIDIOUS_INSTANCES) {
+    try {
+      const data = await fetchJSONInstance(base, `/api/v1/videos/${encodeURIComponent(id)}`);
+      const audio = (data.adaptiveFormats || [])
+        .filter((f) => f.url && /audio/i.test(f.type || ''))
+        .sort((a, b) => parseInt(b.bitrate || '0', 10) - parseInt(a.bitrate || '0', 10))[0];
+      if (!audio) throw new Error(`${base}: no audio`);
+      markInstance(base, true);
+      return {
+        backend: 'invidious',
+        instance: base,
+        title: data.title || '',
+        uploader: data.author || '',
+        duration: data.lengthSeconds || 0,
+        thumbnailUrl: (data.videoThumbnails || []).find((t) => t.quality === 'maxres' || t.quality === 'high')?.url
+                   || (data.videoThumbnails || [])[0]?.url || '',
+        url: audio.url,
+        mime: (audio.type || 'audio/mp4').split(';')[0].trim(),
+        contentLength: audio.contentLength ? parseInt(audio.contentLength, 10) : 0,
+        audioStreams: (data.adaptiveFormats || []).filter((f) => /audio/i.test(f.type || '')).map((f) => ({
+          url: f.url, mimeType: f.type, bitrate: parseInt(f.bitrate || '0', 10), itag: f.itag,
+        })),
+      };
+    } catch (e) {
+      markInstance(base, false);
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('all invidious instances failed');
+}
+
+async function youtubeiGetTrack(id) {
+  const yt = await getYT();
+  const { info, formats, client } = await getInfoWithFormats(yt, id);
+  const m4a = formats.filter((f) => /audio\/mp4/.test(f.mime_type));
+  const pick = (m4a.length ? m4a : formats).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
+  const url = pick.url || await pick.decipher(yt.session.player);
+  const audioStreams = [];
+  for (const f of formats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))) {
+    try {
+      const u = f.url || await f.decipher(yt.session.player);
+      audioStreams.push({ url: u, mimeType: f.mime_type, bitrate: f.bitrate || 0, itag: f.itag });
+    } catch { /* skip */ }
+  }
+  return {
+    backend: 'youtubei',
+    instance: client,
+    title: info?.basic_info?.title || '',
+    uploader: info?.basic_info?.author || '',
+    duration: info?.basic_info?.duration || 0,
+    thumbnailUrl: info?.basic_info?.thumbnail?.[0]?.url || '',
+    url,
+    mime: pick.mime_type || 'audio/mp4',
+    contentLength: pick.content_length ? parseInt(pick.content_length, 10) : 0,
+    audioStreams,
+  };
+}
+
+// Try Piped → Invidious → youtubei.js. Returns a unified track object.
+// Throws an Error whose message lists which backends failed (with a sample
+// of which instance was tried last) — surfaced through /api/music/* JSON
+// errors so the user can see what's broken.
+async function resolveTrack(id) {
+  const errs = [];
+  for (const fn of [pipedGetTrack, invidiousGetTrack, youtubeiGetTrack]) {
+    try {
+      return await fn(id);
+    } catch (e) {
+      errs.push(`${fn.name}: ${String(e.message || e).slice(0, 100)}`);
+    }
+  }
+  throw new Error(errs.join(' | '));
+}
+
+async function pipedSearch(q, filter = 'music_songs') {
+  let lastErr = null;
+  // Piped's filter values: music_songs, music_videos, music_albums,
+  // music_artists, music_playlists, videos, channels, playlists, all.
+  const PIPED_FILTERS = {
+    song: 'music_songs', video: 'music_videos', album: 'music_albums',
+    artist: 'music_artists', playlist: 'music_playlists',
+  };
+  const f = PIPED_FILTERS[filter] || 'music_songs';
+  for (const base of PIPED_INSTANCES) {
+    try {
+      const data = await fetchJSONInstance(base, `/search?q=${encodeURIComponent(q)}&filter=${f}`);
+      markInstance(base, true);
+      return { items: data.items || [], instance: base };
+    } catch (e) { markInstance(base, false); lastErr = e; }
+  }
+  throw lastErr || new Error('all piped instances failed');
+}
+
+async function pipedGetPlaylist(id) {
+  let lastErr = null;
+  for (const base of PIPED_INSTANCES) {
+    try {
+      const data = await fetchJSONInstance(base, `/playlists/${encodeURIComponent(id)}`);
+      markInstance(base, true);
+      return { data, instance: base };
+    } catch (e) { markInstance(base, false); lastErr = e; }
+  }
+  throw lastErr || new Error('all piped instances failed');
+}
+
+// Convert a Piped search/playlist item to our normalized song shape.
+function pipedItemToSong(it) {
+  if (!it) return null;
+  // Piped streams have url like "/watch?v=ID" — extract the videoId.
+  const vmatch = /[?&]v=([a-zA-Z0-9_-]{11})/.exec(it.url || '');
+  const id = vmatch ? vmatch[1] : null;
+  if (!id) return null;
+  return {
+    type: 'track',
+    id,
+    title: it.title || '',
+    artist: it.uploaderName || it.uploader || '',
+    cover: it.thumbnail || '',
+    duration: it.duration || 0,
+  };
+}
+function pipedItemToPlaylist(it) {
+  if (!it) return null;
+  const pmatch = /[?&]list=([a-zA-Z0-9_-]+)/.exec(it.url || '');
+  const id = pmatch ? pmatch[1] : null;
+  if (!id) return null;
+  return {
+    type: 'playlist',
+    id,
+    title: it.name || it.title || '',
+    cover: it.thumbnail || '',
+    artist: it.uploaderName || '',
+  };
+}
 function getYT() {
   if (ytPromise) return ytPromise;
   ytInitError = null;
@@ -414,42 +646,47 @@ app.get('/api/music/status', async (_req, res) => {
     cache: { entries: musicCache.size },
     streamCache: { entries: typeof streamUrlCache !== 'undefined' ? streamUrlCache.size : 0 },
   };
-  // Active probe: walk every client and report which ones return audio
-  // formats from this host's IP. Tells the user at a glance whether
-  // YouTube is rejecting their IP entirely or just throttling specific
-  // clients — and which client to trust if/when we add an env override.
+  // Active probe: walk Piped + Invidious instances and report which
+  // ones serve a known-good track (Blinding Lights) at this moment.
+  // Also tests the local youtubei.js fallback for residential-IP setups.
+  // Result tells the user which backend is healthy right now and which
+  // instances to drop/swap if half are down.
   if (_req.query.probe === '1') {
-    out.probe = { perClient: {} };
-    try {
-      const id = 'J7p4bzqLvCw'; // Blinding Lights
-      const yt = await getYT();
-      for (const client of STREAM_CLIENTS) {
-        try {
-          const info = await yt.getInfo(id, { client });
-          const fmts = (info.streaming_data?.adaptive_formats || [])
-            .filter((f) => f.has_audio && !f.has_video);
-          if (!fmts.length) {
-            out.probe.perClient[client] = { ok: false, reason: 'empty_streaming_data' };
-            continue;
-          }
-          const fmt = fmts.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-          const url = fmt.url || await fmt.decipher(yt.session.player);
-          const r = await fetch(url, {
-            headers: { range: 'bytes=0-1023', origin: 'https://www.youtube.com', 'user-agent': 'Mozilla/5.0' },
-            signal: AbortSignal.timeout(8000),
-          });
-          out.probe.perClient[client] = { ok: r.ok || r.status === 206, status: r.status };
-        } catch (e) {
-          out.probe.perClient[client] = { ok: false, error: e.message.slice(0, 120) };
-        }
+    const id = 'J7p4bzqLvCw'; // Blinding Lights
+    out.probe = { piped: {}, invidious: {}, youtubei: null };
+    // Piped instances
+    for (const base of PIPED_INSTANCES) {
+      try {
+        const data = await fetchJSONInstance(base, `/streams/${id}`, 6000);
+        const audio = (data.audioStreams || []).filter((s) => s.url && /audio/.test(s.mimeType || ''))[0];
+        out.probe.piped[base] = audio ? { ok: true, formats: data.audioStreams?.length || 0 } : { ok: false, reason: 'no_audio' };
+      } catch (e) {
+        out.probe.piped[base] = { ok: false, error: e.message.slice(0, 120) };
       }
-      const winner = Object.entries(out.probe.perClient).find(([, v]) => v.ok);
-      out.probe.recommendedClient = winner ? winner[0] : null;
-      out.probe.ok = !!winner;
-    } catch (e) {
-      out.probe.ok = false;
-      out.probe.error = e.message;
     }
+    // Invidious instances
+    for (const base of INVIDIOUS_INSTANCES) {
+      try {
+        const data = await fetchJSONInstance(base, `/api/v1/videos/${id}`, 6000);
+        const audio = (data.adaptiveFormats || []).filter((f) => f.url && /audio/i.test(f.type || ''))[0];
+        out.probe.invidious[base] = audio ? { ok: true, formats: data.adaptiveFormats?.length || 0 } : { ok: false, reason: 'no_audio' };
+      } catch (e) {
+        out.probe.invidious[base] = { ok: false, error: e.message.slice(0, 120) };
+      }
+    }
+    // youtubei.js (only useful if running on a residential IP)
+    try {
+      const yt = await getYT();
+      const r = await getInfoWithFormats(yt, id);
+      out.probe.youtubei = { ok: true, client: r.client, formats: r.formats.length };
+    } catch (e) {
+      out.probe.youtubei = { ok: false, error: e.message.slice(0, 120) };
+    }
+    const pipedOk     = Object.values(out.probe.piped).some((v) => v.ok);
+    const invOk       = Object.values(out.probe.invidious).some((v) => v.ok);
+    const ytOk        = !!out.probe.youtubei?.ok;
+    out.probe.ok      = pipedOk || invOk || ytOk;
+    out.probe.summary = `piped:${pipedOk ? 'OK' : 'FAIL'} invidious:${invOk ? 'OK' : 'FAIL'} youtubei:${ytOk ? 'OK' : 'FAIL'}`;
   }
   res.json(out);
 });
@@ -554,23 +791,41 @@ app.get('/api/music/search', async (req, res) => {
       res.setHeader('Cache-Control', 'public, max-age=300');
       return res.json(cached);
     }
-    const yt = await getYT();
-    const results = await yt.music.search(q, { type: filter });
-    const sectionByType = {
-      song: results.songs?.contents,
-      video: results.videos?.contents,
-      album: results.albums?.contents,
-      artist: results.artists?.contents,
-      playlist: results.playlists?.contents,
-    };
-    const raw = sectionByType[filter] || results.contents?.[0]?.contents || [];
-    const norm = filter === 'playlist' ? normalizePlaylist
-              : filter === 'album'    ? normalizeAlbum
-              : filter === 'artist'   ? normalizeArtist
-              :                          normalizeSong;
-    const items = [];
-    for (const it of raw) { const n = norm(it); if (n) items.push(n); }
-    const body = { items };
+    let body = null;
+    let lastErr = null;
+    // Piped first — handles all filter types and runs on residential IPs.
+    try {
+      const { items: rawItems, instance } = await pipedSearch(q, filter);
+      const norm = (filter === 'playlist' || filter === 'album') ? pipedItemToPlaylist : pipedItemToSong;
+      const items = [];
+      for (const it of rawItems) { const n = norm(it); if (n) items.push(n); }
+      body = { items, backend: 'piped', instance };
+    } catch (e) { lastErr = e; }
+    // Fall back to youtubei.js (works on residential IP only).
+    if (!body) {
+      try {
+        const yt = await getYT();
+        const results = await yt.music.search(q, { type: filter });
+        const sectionByType = {
+          song: results.songs?.contents,
+          video: results.videos?.contents,
+          album: results.albums?.contents,
+          artist: results.artists?.contents,
+          playlist: results.playlists?.contents,
+        };
+        const raw = sectionByType[filter] || results.contents?.[0]?.contents || [];
+        const norm = filter === 'playlist' ? normalizePlaylist
+                  : filter === 'album'    ? normalizeAlbum
+                  : filter === 'artist'   ? normalizeArtist
+                  :                          normalizeSong;
+        const items = [];
+        for (const it of raw) { const n = norm(it); if (n) items.push(n); }
+        body = { items, backend: 'youtubei' };
+      } catch (e2) {
+        console.error('[music/search] piped+yt failed:', lastErr?.message, '|', e2.message);
+        return res.status(502).json({ error: 'yt_unavailable', detail: `${lastErr?.message || ''} | ${e2.message}` });
+      }
+    }
     cacheSet(cacheKey, body);
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.json(body);
@@ -589,42 +844,20 @@ app.get('/api/music/track/:id', async (req, res) => {
       res.setHeader('Cache-Control', 'private, max-age=60');
       return res.json(cached);
     }
-    const yt = await getYT();
-    // Walk the same multi-client chain as the stream proxy. The client
-    // doesn't actually use audioStreams from /track (it loads bytes
-    // through /api/music/stream/:id which also walks this chain), so
-    // even if NO client returns formats we still surface the metadata —
-    // basic_info.title etc. populate the now-playing bar while the
-    // stream endpoint resolves separately.
-    let info, formats = [], usedClient = null;
-    try {
-      const r = await getInfoWithFormats(yt, id);
-      info = r.info; formats = r.formats; usedClient = r.client;
-    } catch (e) {
-      // Last resort — get metadata-only from any client (typically WEB).
-      try { info = await yt.getInfo(id, { client: 'WEB' }); }
-      catch { info = await yt.getInfo(id); }
-    }
-    formats.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
-    const audioStreams = [];
-    for (const f of formats) {
-      try {
-        const url = f.url || await f.decipher(yt.session.player);
-        audioStreams.push({
-          url,
-          mimeType: f.mime_type,
-          bitrate: f.bitrate || 0,
-          itag: f.itag,
-        });
-      } catch { /* skip bad format */ }
-    }
+    // resolveTrack walks Piped → Invidious → youtubei.js. The client only
+    // reads title/uploader/duration/thumbnailUrl from this endpoint;
+    // audioStreams is included for completeness but the actual byte
+    // stream comes from /api/music/stream/:id (which also resolves via
+    // the same chain).
+    const t = await resolveTrack(id);
     const body = {
-      title: info?.basic_info?.title || '',
-      uploader: info?.basic_info?.author || '',
-      duration: info?.basic_info?.duration || 0,
-      thumbnailUrl: info?.basic_info?.thumbnail?.[0]?.url || '',
-      audioStreams,
-      client: usedClient,
+      title: t.title,
+      uploader: t.uploader,
+      duration: t.duration,
+      thumbnailUrl: t.thumbnailUrl,
+      audioStreams: t.audioStreams || [],
+      backend: t.backend,
+      instance: t.instance,
     };
     cacheSet(`track:${id}`, body);
     res.setHeader('Cache-Control', 'private, max-age=60');
@@ -673,23 +906,12 @@ async function getInfoWithFormats(yt, id, clients = STREAM_CLIENTS) {
 async function resolveStream(id) {
   const hit = streamUrlCache.get(id);
   if (hit && (Date.now() - hit.ts) < STREAM_URL_TTL) return hit;
-  const yt = await getYT();
-  // ANDROID_VR is the most reliable client (only one whose signed URLs
-  // aren't SABR-rate-limited), but if YouTube refuses it for this IP we
-  // fall through to IOS / ANDROID / TV_EMBEDDED / WEB. SABR will hit
-  // those harder but the chunked-512KB proxy compensates per-request.
-  const { info, formats, client } = await getInfoWithFormats(yt, id);
-  console.log(`[music] stream ${id} resolved via ${client}`);
-  const m4a = formats.filter((f) => /audio\/mp4/.test(f.mime_type));
-  const pick = (m4a.length ? m4a : formats).sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0))[0];
-  const url = pick.url || await pick.decipher(yt.session.player);
-  const out = {
-    url,
-    mime: pick.mime_type || 'audio/mp4',
-    contentLength: pick.content_length ? parseInt(pick.content_length, 10) : 0,
-    client,
-    ts: Date.now(),
-  };
+  // Try the Piped → Invidious → youtubei.js chain. The first successful
+  // backend wins; we cache its googlevideo URL until STREAM_URL_TTL
+  // (signed URLs typically last ~5 min before requiring a re-resolve).
+  const info = await resolveTrack(id);
+  console.log(`[music] stream ${id} resolved via ${info.backend}/${info.instance}`);
+  const out = { ...info, ts: Date.now() };
   streamUrlCache.set(id, out);
   return out;
 }
@@ -793,18 +1015,44 @@ app.get('/api/music/playlist/:id', async (req, res) => {
       res.setHeader('Cache-Control', 'public, max-age=300');
       return res.json(cached);
     }
-    const yt = await getYT();
-    const pl = await yt.music.getPlaylist(id);
-    const rawTracks = pl.items || pl.contents || [];
-    const tracks = rawTracks.map(normalizeSong).filter(Boolean);
-    const body = {
-      id,
-      name: txt(pl.header?.title) || txt(pl.title) || 'Playlist',
-      description: txt(pl.header?.description) || txt(pl.description) || '',
-      thumbnailUrl: pickThumb(pl.header?.thumbnails || pl.thumbnails || []),
-      uploader: txt(pl.header?.author?.name) || txt(pl.author) || '',
-      relatedStreams: tracks,
-    };
+    let body = null;
+    let lastErr = null;
+    // Piped first.
+    try {
+      const { data, instance } = await pipedGetPlaylist(id);
+      const tracks = (data.relatedStreams || []).map(pipedItemToSong).filter(Boolean);
+      body = {
+        id,
+        name: data.name || 'Playlist',
+        description: data.description || '',
+        thumbnailUrl: data.thumbnailUrl || '',
+        uploader: data.uploader || '',
+        relatedStreams: tracks,
+        backend: 'piped',
+        instance,
+      };
+    } catch (e) { lastErr = e; }
+    // Fall back to youtubei.js.
+    if (!body) {
+      try {
+        const yt = await getYT();
+        const pl = await yt.music.getPlaylist(id);
+        const rawTracks = pl.items || pl.contents || [];
+        const tracks = rawTracks.map(normalizeSong).filter(Boolean);
+        body = {
+          id,
+          name: txt(pl.header?.title) || txt(pl.title) || 'Playlist',
+          description: txt(pl.header?.description) || txt(pl.description) || '',
+          thumbnailUrl: pickThumb(pl.header?.thumbnails || pl.thumbnails || []),
+          uploader: txt(pl.header?.author?.name) || txt(pl.author) || '',
+          relatedStreams: tracks,
+          backend: 'youtubei',
+        };
+      } catch (e2) {
+        console.error('[music/playlist] piped+yt failed:', lastErr?.message, '|', e2.message);
+        return res.status(502).json({ error: 'yt_unavailable', detail: `${lastErr?.message || ''} | ${e2.message}` });
+      }
+    }
     cacheSet(`playlist:${id}`, body);
     res.setHeader('Cache-Control', 'public, max-age=300');
     res.json(body);
