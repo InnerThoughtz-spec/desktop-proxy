@@ -54,6 +54,63 @@ const bare = createBareServer(BARE_PREFIX, {
 
 const app = express();
 
+// ---------- Music backend forwarding ----------
+// When MUSIC_PROXY_URL is set, every /api/music/* request gets piped to
+// that origin instead of being handled locally. Used to route YouTube
+// calls through a residential-IP backend (typically a home PC reachable
+// via Tailscale) — YouTube refuses streams to data-center IPs even
+// with valid cookies, so the public site stays on the cloud VM but
+// the YouTube-touching code runs at home. Falls through to local
+// handlers if the upstream is unreachable.
+//
+// Format: MUSIC_PROXY_URL=http://100.x.y.z:3001 (no trailing slash)
+const MUSIC_PROXY_URL = (process.env.MUSIC_PROXY_URL || '').replace(/\/$/, '');
+if (MUSIC_PROXY_URL) {
+  const http = require('node:http');
+  const https = require('node:https');
+  const { URL: URLClass } = require('node:url');
+  const target = new URLClass(MUSIC_PROXY_URL);
+  const lib = target.protocol === 'https:' ? https : http;
+  console.log(`[music-proxy] forwarding /api/music/* to ${MUSIC_PROXY_URL}`);
+  app.use('/api/music', (req, res) => {
+    // Strip headers that would confuse the upstream (host, content-length
+    // we'll let node recompute, connection-specific stuff).
+    const fwdHeaders = { ...req.headers };
+    delete fwdHeaders['host'];
+    delete fwdHeaders['content-length'];
+    delete fwdHeaders['connection'];
+    const upstream = lib.request({
+      hostname: target.hostname,
+      port: target.port || (target.protocol === 'https:' ? 443 : 80),
+      protocol: target.protocol,
+      method: req.method,
+      path: '/api/music' + req.url,
+      headers: fwdHeaders,
+      timeout: 30 * 1000,
+    });
+    upstream.on('response', (upRes) => {
+      res.writeHead(upRes.statusCode || 502, upRes.headers);
+      upRes.pipe(res);
+    });
+    upstream.on('error', (err) => {
+      console.error('[music-proxy] upstream error:', err.message);
+      if (!res.headersSent) {
+        res.status(502).json({
+          error: 'music_proxy_failed',
+          detail: err.message,
+          hint: `Music backend at ${MUSIC_PROXY_URL} is unreachable. Check that the home PC is on, the music server is running on port ${target.port || 3001}, and Tailscale is connected on both ends.`,
+        });
+      } else {
+        try { res.end(); } catch (_) {}
+      }
+    });
+    upstream.on('timeout', () => {
+      upstream.destroy(new Error('upstream timeout'));
+    });
+    req.pipe(upstream);
+  });
+}
+
 app.get('/uv/uv.config.js', (_req, res) => {
   res.type('application/javascript').sendFile(path.join(__dirname, 'public', 'uv.config.js'));
 });
