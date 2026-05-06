@@ -79,6 +79,14 @@ if (MUSIC_PROXY_URL) {
     delete fwdHeaders['host'];
     delete fwdHeaders['content-length'];
     delete fwdHeaders['connection'];
+    // Differentiate timeouts by endpoint type. Audio /stream/* requests
+    // hold a connection open while bytes flow (and googlevideo sometimes
+    // throttles with multi-second pauses between bursts) — give them 5
+    // minutes of socket-idle slack. Everything else (track, search,
+    // home, playlist, status) is metadata that should respond in <5s; a
+    // 30s timeout there means a dead home PC fails fast with a clear
+    // 502 instead of an infinite "Loading..." in the UI.
+    const isStream = req.url.startsWith('/stream/');
     const upstream = lib.request({
       hostname: target.hostname,
       port: target.port || (target.protocol === 'https:' ? 443 : 80),
@@ -86,12 +94,7 @@ if (MUSIC_PROXY_URL) {
       method: req.method,
       path: '/api/music' + req.url,
       headers: fwdHeaders,
-      // No request-level timeout — the audio stream endpoint holds a
-      // single connection open for the entire song duration (could be
-      // 5+ minutes), and a low timeout here would terminate playback
-      // mid-track. Connection liveness is enforced by the underlying
-      // TCP keepalive instead. If the home PC actually goes offline,
-      // the 'error' handler fires and we 502 cleanly.
+      timeout: isStream ? 5 * 60 * 1000 : 30 * 1000,
     });
     // Tear down the upstream socket if the client (browser) disconnects
     // mid-stream — otherwise we'd leave a dangling fetch on the home PC.
@@ -111,6 +114,9 @@ if (MUSIC_PROXY_URL) {
       } else {
         try { res.end(); } catch (_) {}
       }
+    });
+    upstream.on('timeout', () => {
+      upstream.destroy(new Error(`upstream socket idle for ${isStream ? '5min' : '30s'}`));
     });
     req.pipe(upstream);
   });
