@@ -304,13 +304,17 @@ function normalizeTruffled(data) {
   const BASE = 'https://truffled.lol';
   return list
     .filter((g) => g && g.name && g.url)
-    .map((g, i) => ({
-      id: 'tr-' + (g.url || '').replace(/[^a-z0-9]+/gi, '-').slice(0, 60) + '-' + i,
-      name: safeStr(g.name),
-      source: 'Truffled',
-      thumb: g.thumbnail ? joinUrl(BASE, g.thumbnail) : '',
-      url: joinUrl(BASE, g.url),
-    }));
+    .map((g, i) => {
+      const url = joinUrl(BASE, g.url);
+      return {
+        id: 'tr-' + (g.url || '').replace(/[^a-z0-9]+/gi, '-').slice(0, 60) + '-' + i,
+        name: safeStr(g.name),
+        source: 'Truffled',
+        thumb: g.thumbnail ? joinUrl(BASE, g.thumbnail) : '',
+        url,
+        _probeUrl: url,
+      };
+    });
 }
 
 function normalize3kh0(data) {
@@ -321,12 +325,14 @@ function normalize3kh0(data) {
     .map((g) => {
       const link = safeStr(g.link);
       const slug = link.replace(/^projects\//, '').replace(/\/index\.html$/, '').replace(/[^a-z0-9]+/gi, '-');
+      const url = joinUrl(BASE, link);
       return {
         id: '3k-' + slug,
         name: safeStr(g.title),
         source: '3kh0',
         thumb: g.imgSrc ? joinUrl(BASE, g.imgSrc) : '',
-        url: joinUrl(BASE, link),
+        url,
+        _probeUrl: url,
       };
     });
 }
@@ -358,8 +364,89 @@ function normalizeSelenite(data) {
         source: 'Selenite',
         thumb: img ? `${BASE}/resources/${prefix}/${dir}/${img}` : '',
         url: `${BASE}/loader.html?${params.toString()}`,
+        // The loader.html itself always returns 200; the actual game lives
+        // at /resources/semag/{dir}/index.html. That underlying URL is
+        // what the probe pass HEADs to decide whether the game is real or
+        // just a stale manifest entry pointing at a removed directory.
+        _probeUrl: `${BASE}/resources/${prefix}/${dir}/index.html`,
       };
     });
+}
+
+// HEAD-check a single URL with a short timeout. Returns true on 2xx/3xx,
+// false on 4xx/5xx, network error, or timeout. Used by the background
+// probe pass to drop manifest entries whose game URL is dead.
+async function probeGameUrl(url, timeoutMs = 5000) {
+  if (!url) return false;
+  try {
+    // Some hosts (selenite, truffled) reject HEAD with 405; fall back to
+    // a tiny GET with a Range header so we don't pull whole files.
+    let r = await fetch(url, {
+      method: 'HEAD',
+      signal: AbortSignal.timeout(timeoutMs),
+      headers: { 'user-agent': 'Mozilla/5.0', 'accept': 'text/html' },
+      redirect: 'follow',
+    });
+    if (r.status === 405 || r.status === 501) {
+      r = await fetch(url, {
+        method: 'GET',
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: { 'user-agent': 'Mozilla/5.0', 'accept': 'text/html', 'range': 'bytes=0-0' },
+        redirect: 'follow',
+      });
+      // We don't actually need the body — abort right after headers arrive.
+      try { r.body?.cancel(); } catch (_) {}
+    }
+    return r.status >= 200 && r.status < 400;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Concurrent map with a worker pool. Each item runs through fn(); we cap
+// the in-flight count at `concurrency` so we don't fork-bomb the upstream
+// host (selenite + truffled are small static sites).
+async function runConcurrent(items, concurrency, fn) {
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      try { await fn(items[idx], idx); } catch (_) { /* swallow per-item errors */ }
+    }
+  }
+  await Promise.all(Array(Math.min(concurrency, items.length)).fill(0).map(worker));
+}
+
+// Walk every game with a _probeUrl and HEAD-check it. Returns a new
+// manifest object with dead games filtered out and source counts updated.
+// Logs a single line summarizing how many were dropped per source.
+async function probeManifest(manifest) {
+  const t0 = Date.now();
+  const games = manifest.games;
+  const probable = games.filter((g) => g._probeUrl);
+  const liveIds = new Set();
+  // Mark all games that don't need probing (no _probeUrl, e.g. GN-Math
+  // local routes) as live by default.
+  for (const g of games) if (!g._probeUrl) liveIds.add(g.id);
+  // Probe in parallel — concurrency 24 keeps each individual host
+  // (selenite.cc, truffled.lol, 1kh0.github.io) at a polite RPS.
+  await runConcurrent(probable, 24, async (g) => {
+    if (await probeGameUrl(g._probeUrl, 5000)) liveIds.add(g.id);
+  });
+  const filtered = games.filter((g) => liveIds.has(g.id));
+  // Strip _probeUrl from the response shape — internal field only.
+  const cleanGames = filtered.map((g) => {
+    const { _probeUrl, ...rest } = g;
+    return rest;
+  });
+  // Recompute source counts.
+  const sources = {};
+  for (const k of Object.keys(manifest.sources || {})) {
+    sources[k] = { ...manifest.sources[k], count: cleanGames.filter((x) => x.source === k).length };
+  }
+  const dropped = games.length - filtered.length;
+  console.log(`[arcade-probe] dropped ${dropped}/${games.length} dead games in ${Math.round((Date.now() - t0) / 1000)}s`);
+  return { ...manifest, games: cleanGames, sources, probed: true, probeTs: Date.now() };
 }
 
 async function buildArcadeManifest() {
@@ -1293,15 +1380,40 @@ app.get(/^\/api\/arcade\/gh\/([^/]+)\/([^/]+)\/([^/]+)\/(.*)$/, async (req, res)
   }
 });
 
+// Background probe runs in parallel with serving; only one at a time.
+let arcadeProbeInFlight = false;
+function kickArcadeProbe(unprobed) {
+  if (arcadeProbeInFlight) return;
+  if (unprobed.probed) return; // already filtered, nothing to do
+  arcadeProbeInFlight = true;
+  probeManifest(unprobed)
+    .then((probed) => {
+      // Only commit the probe result if the cache hasn't been replaced by
+      // a newer build in the meantime (e.g. TTL flip during the probe).
+      if (arcadeCache.data === unprobed) {
+        arcadeCache = { ts: arcadeCache.ts, data: probed };
+      }
+    })
+    .catch((e) => console.error('[arcade-probe]', e.message))
+    .finally(() => { arcadeProbeInFlight = false; });
+}
+
 app.get('/api/arcade/games', async (_req, res) => {
   const now = Date.now();
   if (arcadeCache.data && (now - arcadeCache.ts) < ARCADE_TTL) {
+    // Cache hit. If the entry hasn't been probed yet, kick a background
+    // probe so the next request gets the filtered version. Doesn't block
+    // the response.
+    kickArcadeProbe(arcadeCache.data);
     res.setHeader('Cache-Control', 'public, max-age=600');
     return res.json(arcadeCache.data);
   }
   try {
     const data = await buildArcadeManifest();
     arcadeCache = { ts: now, data };
+    // Serve unprobed list immediately for snappy first load. Probe runs
+    // in the background and replaces cache when done (~30-60s).
+    kickArcadeProbe(data);
     res.setHeader('Cache-Control', 'public, max-age=600');
     res.json(data);
   } catch (e) {
