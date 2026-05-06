@@ -86,8 +86,16 @@ if (MUSIC_PROXY_URL) {
       method: req.method,
       path: '/api/music' + req.url,
       headers: fwdHeaders,
-      timeout: 30 * 1000,
+      // No request-level timeout — the audio stream endpoint holds a
+      // single connection open for the entire song duration (could be
+      // 5+ minutes), and a low timeout here would terminate playback
+      // mid-track. Connection liveness is enforced by the underlying
+      // TCP keepalive instead. If the home PC actually goes offline,
+      // the 'error' handler fires and we 502 cleanly.
     });
+    // Tear down the upstream socket if the client (browser) disconnects
+    // mid-stream — otherwise we'd leave a dangling fetch on the home PC.
+    res.on('close', () => { try { upstream.destroy(); } catch (_) {} });
     upstream.on('response', (upRes) => {
       res.writeHead(upRes.statusCode || 502, upRes.headers);
       upRes.pipe(res);
@@ -103,9 +111,6 @@ if (MUSIC_PROXY_URL) {
       } else {
         try { res.end(); } catch (_) {}
       }
-    });
-    upstream.on('timeout', () => {
-      upstream.destroy(new Error('upstream timeout'));
     });
     req.pipe(upstream);
   });
