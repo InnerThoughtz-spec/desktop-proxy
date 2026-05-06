@@ -2498,7 +2498,18 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         } else {
           try {
             await waitForUV(15000);
-            const eng = OS.proxy.engineFor(OS.proxy.getEngine());
+            // Per-source engine pinning. 3kh0 games are mostly Construct 2
+            // exports — their HTML loads internal modules via mixed
+            // absolute (`/js/main.js`) and relative (`data.js`) paths.
+            // Scramjet's URL rewriter chokes on this combo and ends up
+            // 500'ing on `/scram/data.js` plus 404'ing OfflineClient.js,
+            // so the runtime fails with "Project model unavailable."
+            // UV's HTML rewriter handles the same combination cleanly,
+            // so we force UV for 3kh0 regardless of the user's globally
+            // selected engine. The user's choice still applies to every
+            // other source.
+            const engineId = g.source === '3kh0' ? 'uv' : OS.proxy.getEngine();
+            const eng = OS.proxy.engineFor(engineId);
             if (!eng || typeof eng.encodeUrl !== 'function' || typeof eng.prefix !== 'function') {
               throw new Error('proxy engine not available');
             }
