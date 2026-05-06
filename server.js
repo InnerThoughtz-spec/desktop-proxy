@@ -1119,31 +1119,49 @@ app.get('/api/music/stream/:id', async (req, res) => {
     if (!isFinite(effectiveEnd)) effectiveEnd = start + CHUNK - 1;
     const range = `bytes=${start}-${effectiveEnd}`;
 
-    const upstream = await fetch(url, {
-      headers: {
-        'range': range,
-        // googlevideo gates on these — without them you can get 403.
-        'origin': 'https://www.youtube.com',
-        'referer': 'https://www.youtube.com/',
-        'user-agent': 'Mozilla/5.0',
-      },
-    });
+    const FETCH_HEADERS = {
+      'range': range,
+      // googlevideo gates on these — without them you can get 403.
+      'origin': 'https://www.youtube.com',
+      'referer': 'https://www.youtube.com/',
+      'user-agent': 'Mozilla/5.0',
+    };
+    let upstream = await fetch(url, { headers: FETCH_HEADERS });
+    let activeMime = mime;
+
+    // Retry on 403 (URL signature failed) and 410 (URL expired). We try
+    // up to 2 fresh resolves — first delete the cache and re-walk the
+    // backend chain (Piped → Invidious → youtubei.js with all clients);
+    // if that still 403s the second attempt forces a different client
+    // path. After both retries the upstream URL is genuinely dead, so
+    // we surface a clean JSON 502 instead of piping the 403 body back
+    // as audio — that's what triggers PIPELINE_ERROR_READ:FFmpegDemuxer
+    // in the browser.
+    let retries = 0;
+    while ((upstream.status === 403 || upstream.status === 410) && retries < 2) {
+      retries++;
+      streamUrlCache.delete(id);
+      console.warn(`[music/stream] ${id} got ${upstream.status}, retry ${retries}/2`);
+      try {
+        const fresh = await resolveStream(id);
+        activeMime = fresh.mime;
+        upstream = await fetch(fresh.url, { headers: FETCH_HEADERS });
+      } catch (e) {
+        console.error(`[music/stream] retry ${retries} resolve failed:`, e.message);
+        break;
+      }
+    }
 
     if (upstream.status === 403 || upstream.status === 410) {
-      // Signed URL expired — bust the cache and try once more.
-      streamUrlCache.delete(id);
-      const fresh = await resolveStream(id);
-      const retry = await fetch(fresh.url, {
-        headers: {
-          'range': range,
-          'origin': 'https://www.youtube.com',
-          'referer': 'https://www.youtube.com/',
-          'user-agent': 'Mozilla/5.0',
-        },
+      // Both retries failed — return a clean JSON error instead of
+      // piping the 403 body to the audio element.
+      return res.status(502).json({
+        error: 'stream_blocked',
+        detail: `googlevideo returned ${upstream.status} after ${retries} retries`,
+        hint: 'YouTube\'s signed URL was rejected — usually means the YT_COOKIE rotated, the home PC\'s IP got temporarily flagged, or the track has new geo/age restrictions. Try a different track first; if every track 403s, refresh YT_COOKIE.',
       });
-      return pipeUpstream(retry, res, fresh.mime);
     }
-    return pipeUpstream(upstream, res, mime);
+    return pipeUpstream(upstream, res, activeMime);
   } catch (e) {
     console.error('[music/stream]', e.message);
     if (!res.headersSent) {
