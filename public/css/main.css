@@ -1114,6 +1114,17 @@ input, textarea { font: inherit; color: inherit; }
   transition: background .12s var(--ease);
 }
 .is-iconbtn:hover { background: rgba(255,255,255,.12); }
+/* Active-toggle style — used by the proxy-mode button in the InnerMovies
+   player to indicate the iframe is being routed through UV instead of
+   loaded direct. Same affordance available for any other on/off icon
+   button that needs an "engaged" appearance. */
+.is-iconbtn.is-on {
+  background: rgba(125,249,255,.18);
+  color: #7df9ff;
+  box-shadow: 0 0 0 1px rgba(125,249,255,.45),
+              0 0 12px rgba(125,249,255,.3);
+}
+.is-iconbtn.is-on:hover { background: rgba(125,249,255,.28); }
 .is-wordmark {
   font-weight: 700; font-size: 18px; letter-spacing: .02em;
   color: #fff;
@@ -1563,7 +1574,18 @@ input, textarea { font: inherit; color: inherit; }
 }
 .ia-card-blank {
   display: flex; align-items: center; justify-content: center;
-  font-size: 38px; font-weight: 800; color: rgba(255,255,255,.4);
+  font-size: 38px; font-weight: 800;
+  /* Each placeholder gets a unique hue derived from the game name so the
+     fallback grid still feels visually varied even when a whole batch of
+     thumbnails (e.g. Truffled's deleted numbered files) 404s. The --ia-hue
+     CSS variable is set inline by gameCardHTML / its onerror handler. */
+  --ia-hue: 200;
+  color: hsl(var(--ia-hue), 35%, 78%);
+  background:
+    linear-gradient(135deg,
+      hsla(var(--ia-hue), 55%, 28%, .9),
+      hsla(calc(var(--ia-hue) + 30), 50%, 18%, .9));
+  text-shadow: 0 1px 8px hsla(var(--ia-hue), 60%, 20%, .8);
 }
 .ia-card-name {
   font-size: 12.5px; line-height: 1.3;

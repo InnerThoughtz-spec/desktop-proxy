@@ -1229,6 +1229,14 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         <div><div class="label">Clear proxy data</div><div class="desc">Unregister service worker and clear caches.</div></div>
         <div><button class="btn ghost" data-act="clear">Clear</button></div>
       </div>
+      <h3>Performance</h3>
+      <div class="settings-row">
+        <div>
+          <div class="label">Free up memory</div>
+          <div class="desc">Closes inactive browser tabs, clears the UV cookie store, and runs a one-shot cookie heal. Use when the desktop feels sluggish — quicker than reloading the whole page and doesn't sign you out of Inner-OS.</div>
+        </div>
+        <div><button class="btn ghost" data-act="cleanup" data-cleanup-status="">Clean up</button></div>
+      </div>
       <h3>Active engine config</h3>
       <pre data-role="cfg" style="background: var(--panel-hi); padding: 10px; border-radius: 8px; font-size: 12px; overflow:auto; max-height:180px;"></pre>`;
     const statusEl = main.querySelector('#sw-status');
@@ -1272,6 +1280,51 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         for (const r of regs) await r.unregister();
         if (window.caches) { const keys = await caches.keys(); for (const k of keys) await caches.delete(k); }
         updateStatus();
+      }
+      if (t.dataset.act === 'cleanup') {
+        // Memory cleanup: close inactive browser tabs, clear UV cookie
+        // store, run heal pass, drop in-memory app caches. The heaviest
+        // contributor to "desktop feels slow after a while" is usually
+        // accumulated browser-app tabs each holding a live iframe — those
+        // pile up DOM + JS + cookies even when the user has navigated away.
+        t.disabled = true;
+        const orig = t.textContent;
+        t.textContent = 'Cleaning…';
+        try {
+          let report = [];
+          // 1. Close all but the active browser-app tab (per browser app
+          //    instance — there can be multiple browser windows open).
+          let tabsClosed = 0;
+          document.querySelectorAll('.browser').forEach((bx) => {
+            const tabs = bx.querySelectorAll('.tab');
+            const active = bx.querySelector('.tab.is-active');
+            tabs.forEach((tab) => {
+              if (tab !== active) {
+                const closeBtn = tab.querySelector('.tab-close');
+                if (closeBtn) { closeBtn.click(); tabsClosed++; }
+              }
+            });
+          });
+          if (tabsClosed) report.push(`closed ${tabsClosed} tab${tabsClosed === 1 ? '' : 's'}`);
+          // 2. Heal + clear the UV cookie store.
+          try {
+            const healed = await OS.proxy.healCookies?.();
+            if (typeof healed === 'number' && healed > 0) report.push(`healed ${healed} corrupt cookie${healed === 1 ? '' : 's'}`);
+          } catch (_) {}
+          try {
+            const cleared = await OS.proxy.clearCookies?.();
+            if (typeof cleared === 'number' && cleared > 0) report.push(`cleared ${cleared} session cookie${cleared === 1 ? '' : 's'}`);
+          } catch (_) {}
+          // 3. Trigger garbage collection if exposed (only available with
+          //    --js-flags=--expose-gc; harmless when not present).
+          try { window.gc?.(); } catch (_) {}
+          t.textContent = report.length ? `Done · ${report.join(', ')}` : 'Already clean';
+          setTimeout(() => { t.textContent = orig; t.disabled = false; }, 3500);
+        } catch (err) {
+          t.textContent = 'Failed';
+          console.error('[cleanup]', err);
+          setTimeout(() => { t.textContent = orig; t.disabled = false; }, 2500);
+        }
       }
     });
   }
@@ -1951,6 +2004,36 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         'autoembed.cc', '2embed.cc',
       ];
 
+      // ---- Proxy mode (school filter workaround) ----
+      // Embed providers like vidking.net are normally iframed direct.
+      // School filters block those domains so the iframe shows
+      // "ERR_NAME_NOT_RESOLVED" or a block page. Proxy mode routes the
+      // iframe through UV instead — the school only sees inneros.dpdns.org
+      // traffic. Adds a small latency per request but keeps movies working
+      // on school networks. Persisted in localStorage so the toggle sticks
+      // across sessions.
+      const PROXY_MODE_KEY = 'inner.movies.proxyMode';
+      function getProxyMode() {
+        try { return localStorage.getItem(PROXY_MODE_KEY) === '1'; }
+        catch { return false; }
+      }
+      function setProxyMode(on) {
+        try { localStorage.setItem(PROXY_MODE_KEY, on ? '1' : '0'); } catch {}
+      }
+      // Build the actual iframe src for a provider URL — direct or
+      // proxied based on current toggle. Proxy mode awaits UV before
+      // returning; direct mode is synchronous.
+      async function buildEmbedSrc(rawUrl) {
+        if (!getProxyMode()) return rawUrl;
+        try {
+          await waitForUV(8000);
+          const eng = OS.proxy.engineFor(OS.proxy.getEngine());
+          if (!eng?.encodeUrl || !eng?.prefix) return rawUrl;
+          if (typeof eng.available === 'function' && !eng.available()) return rawUrl;
+          return eng.prefix() + eng.encodeUrl(rawUrl);
+        } catch (_) { return rawUrl; }
+      }
+
       function renderPlayer(title, subtitle, type, params) {
         currentView = 'player';
         backBtn.hidden = false;
@@ -1963,7 +2046,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
                         encodeURIComponent(params.season),
                         encodeURIComponent(params.ep));
         let provider = getProvider();
-        const url = urlFor(provider);
+        const rawUrl = urlFor(provider);
 
         stageEl.innerHTML = `
           <div class="is-player">
@@ -1971,6 +2054,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
               <div class="is-player-title">${escapeHtml(title)}</div>
               <div class="is-player-source">${escapeHtml(subtitle)}</div>
               <div style="flex:1"></div>
+              <button class="is-iconbtn ${getProxyMode() ? 'is-on' : ''}" data-act="player-proxy" title="Proxy mode — route the player through UV so school filters can't block embed domains. Slightly slower but works on locked-down networks.">🔒</button>
               <select class="is-player-server" data-act="provider" title="Streaming server (try another if the current one fails)">
                 ${MOVIE_PROVIDERS.map((p) =>
                   `<option value="${p.id}"${p.id === provider.id ? ' selected' : ''}>${escapeHtml(p.label)}</option>`
@@ -1982,10 +2066,15 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
               <button class="is-iconbtn" data-act="player-close" title="Close">✕</button>
             </div>
             <iframe class="is-player-frame"
-                    src="${url}"
+                    src=""
                     allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                     allowfullscreen referrerpolicy="no-referrer" loading="eager"></iframe>
           </div>`;
+        // Resolve the iframe src async (proxy mode needs to await UV).
+        buildEmbedSrc(rawUrl).then((src) => {
+          const f = stageEl.querySelector('.is-player-frame');
+          if (f) f.src = src;
+        });
         const winEl = root.closest('.win');
         stageEl.querySelector('[data-act="player-min"]')?.addEventListener('click', () => {
           winEl?.querySelector('.win-min')?.click();
@@ -1997,13 +2086,27 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           const iframe = stageEl.querySelector('.is-player-frame');
           if (iframe && OS.enterGameFullscreen) OS.enterGameFullscreen(iframe);
         });
-        stageEl.querySelector('[data-act="provider"]')?.addEventListener('change', (e) => {
+        stageEl.querySelector('[data-act="provider"]')?.addEventListener('change', async (e) => {
           const next = MOVIE_PROVIDERS.find((p) => p.id === e.target.value);
           if (!next) return;
           setProvider(next.id);
           provider = next;
+          const src = await buildEmbedSrc(urlFor(next));
           const iframe = stageEl.querySelector('.is-player-frame');
-          if (iframe) iframe.src = urlFor(next);
+          if (iframe) iframe.src = src;
+        });
+        // Proxy toggle — flips the iframe between direct (default) and
+        // UV-proxied. Visual state is the .is-on class; persists to
+        // localStorage so the user's choice sticks across sessions.
+        stageEl.querySelector('[data-act="player-proxy"]')?.addEventListener('click', async (e) => {
+          const btn = e.currentTarget;
+          const next = !getProxyMode();
+          setProxyMode(next);
+          btn.classList.toggle('is-on', next);
+          // Reload the iframe with the new mode.
+          const src = await buildEmbedSrc(urlFor(provider));
+          const iframe = stageEl.querySelector('.is-player-frame');
+          if (iframe) iframe.src = src;
         });
         // Reset cache: the targeted version of "clear site data and
         // reload." Does three things:
@@ -2032,7 +2135,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
             newFrame.loading = 'eager';
             const u = new URL(urlFor(provider));
             u.searchParams.set('_cb', Date.now().toString(36));
-            newFrame.src = u.toString();
+            newFrame.src = await buildEmbedSrc(u.toString());
             oldFrame.replaceWith(newFrame);
           }
           btn.disabled = false;
@@ -2152,6 +2255,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
                 <option value="GN-Math">GN-Math</option>
                 <option value="Truffled">Truffled</option>
                 <option value="Selenite">Selenite</option>
+                <option value="3kh0">3kh0</option>
               </select>
               <button class="is-iconbtn" data-act="reload" title="Reload">↻</button>
               <button class="is-iconbtn" data-act="fullscreen" title="Fullscreen">⛶</button>
@@ -2287,7 +2391,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
 
         stageEl.innerHTML = `
           <div class="ia-stats">
-            ${total.toLocaleString()} games · GN-Math · Truffled · Selenite
+            ${total.toLocaleString()} games · GN-Math · Truffled · Selenite · 3kh0
             ${q ? ` · matching "<b>${escapeHtml(q)}</b>"` : ''}
           </div>
           ${sections.map((g) => `
@@ -2305,7 +2409,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       }
 
       function groupBySource(games) {
-        const order = ['GN-Math', 'Truffled', 'Selenite', 'Other'];
+        const order = ['GN-Math', 'Truffled', 'Selenite', '3kh0', 'Other'];
         const map = {};
         for (const g of games) {
           const k = g.source || 'Other';
@@ -2314,10 +2418,26 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         return order.filter((k) => map[k]).map((k) => ({ source: k, list: map[k] }));
       }
 
+      // Hash-derived hue for placeholder cards. Truffled (and others) have
+      // some games whose thumbnail URL 404s; instead of a uniform grey
+      // letter we tint each placeholder by a hue derived from the game's
+      // name so the grid still feels visually varied.
+      function nameHue(name) {
+        let h = 0;
+        for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+        return ((h % 360) + 360) % 360;
+      }
+
       function gameCardHTML(g) {
         const initial = (g.name || '?').charAt(0).toUpperCase();
         const thumb = g.thumb ? escapeHtml(g.thumb) : '';
+        const hue = nameHue(g.name || '?');
         const fav = favs.has(g.id);
+        // We pre-build the placeholder style on the IMG itself (--ia-hue
+        // CSS var) so that when the onerror handler replaces it with a
+        // .ia-card-blank div it inherits the same hue without needing
+        // extra JS. Inline style sets the var on the img element.
+        const placeholderStyle = `--ia-hue:${hue}`;
         return `
           <div class="ia-card" data-play="${escapeHtml(g.id)}" title="${escapeHtml(g.name)}" tabindex="0">
             <button class="ia-fav ${fav ? 'is-on' : ''}" data-fav="${escapeHtml(g.id)}"
@@ -2325,8 +2445,8 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
               ${fav ? '★' : '☆'}
             </button>
             ${thumb
-              ? `<img class="ia-card-thumb" src="${thumb}" alt="" referrerpolicy="no-referrer" loading="lazy" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ia-card-thumb ia-card-blank',textContent:'${escapeHtml(initial)}'}))">`
-              : `<div class="ia-card-thumb ia-card-blank">${escapeHtml(initial)}</div>`}
+              ? `<img class="ia-card-thumb" src="${thumb}" alt="" style="${placeholderStyle}" referrerpolicy="no-referrer" loading="lazy" onerror="const d=document.createElement('div');d.className='ia-card-thumb ia-card-blank';d.textContent='${escapeHtml(initial)}';d.style.setProperty('--ia-hue','${hue}');this.replaceWith(d);">`
+              : `<div class="ia-card-thumb ia-card-blank" style="${placeholderStyle}">${escapeHtml(initial)}</div>`}
             <div class="ia-card-name">${escapeHtml(g.name)}</div>
             <div class="ia-card-source">${escapeHtml(g.source || 'Other')}</div>
           </div>`;

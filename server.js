@@ -250,6 +250,12 @@ const ARCADE_SOURCES = {
   GN_MATH:  'https://raw.githubusercontent.com/gn-math/assets/main/zones.json',
   TRUFFLED: 'https://raw.githubusercontent.com/aukak/truffled/main/public/js/json/g.json',
   SELENITE: 'https://selenite.cc/resources/games.json',
+  // 3kh0-lite catalog. Manifest lives in the GitHub repo; the actual
+  // game assets are mirrored at multiple GH-Pages domains (1kh0, 3kho,
+  // 2kh0). We pick 1kh0.github.io as the primary host since it's the
+  // most stable as of May 2026 — if a school filter blocks one domain
+  // the others typically still resolve via the proxy. ~145 games.
+  THREEKH0: 'https://raw.githubusercontent.com/3kh0/3kh0-lite/main/config/games.json',
 };
 
 async function fetchJSONOrNull(url) {
@@ -307,6 +313,24 @@ function normalizeTruffled(data) {
     }));
 }
 
+function normalize3kh0(data) {
+  if (!Array.isArray(data)) return [];
+  const BASE = 'https://1kh0.github.io';
+  return data
+    .filter((g) => g && g.title && g.link)
+    .map((g) => {
+      const link = safeStr(g.link);
+      const slug = link.replace(/^projects\//, '').replace(/\/index\.html$/, '').replace(/[^a-z0-9]+/gi, '-');
+      return {
+        id: '3k-' + slug,
+        name: safeStr(g.title),
+        source: '3kh0',
+        thumb: g.imgSrc ? joinUrl(BASE, g.imgSrc) : '',
+        url: joinUrl(BASE, link),
+      };
+    });
+}
+
 function normalizeSelenite(data) {
   if (!Array.isArray(data)) return [];
   const BASE = 'https://selenite.cc';
@@ -339,15 +363,17 @@ function normalizeSelenite(data) {
 }
 
 async function buildArcadeManifest() {
-  const [gn, tr, sel] = await Promise.all([
+  const [gn, tr, sel, k3] = await Promise.all([
     fetchJSONOrNull(ARCADE_SOURCES.GN_MATH),
     fetchJSONOrNull(ARCADE_SOURCES.TRUFFLED),
     fetchJSONOrNull(ARCADE_SOURCES.SELENITE),
+    fetchJSONOrNull(ARCADE_SOURCES.THREEKH0),
   ]);
   const games = [
     ...normalizeGNMath(gn),
     ...normalizeTruffled(tr),
     ...normalizeSelenite(sel),
+    ...normalize3kh0(k3),
   ];
   // Sort each source alphabetically; mix happens client-side via grouping.
   games.sort((a, b) => {
@@ -360,6 +386,7 @@ async function buildArcadeManifest() {
       'GN-Math':  { count: games.filter((x) => x.source === 'GN-Math').length,  available: !!gn },
       'Truffled': { count: games.filter((x) => x.source === 'Truffled').length, available: !!tr },
       'Selenite': { count: games.filter((x) => x.source === 'Selenite').length, available: !!sel },
+      '3kh0':     { count: games.filter((x) => x.source === '3kh0').length,     available: !!k3 },
     },
     ts: Date.now(),
   };
