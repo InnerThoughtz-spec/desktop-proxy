@@ -1981,6 +1981,31 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           movie: (id)        => `https://www.2embed.cc/embed/${id}`,
           tv:    (id, s, e)  => `https://www.2embed.cc/embedtv/${id}&s=${s}&e=${e}`,
         },
+        // Extra providers added for obscure-title coverage. embed.su has
+        // a notably deep B-movie / direct-to-video catalog (e.g. the
+        // Gingerdead Man / Evil Bong franchise that VidKing doesn't
+        // index). MoviesAPI is older but still aggregates multiple CDNs.
+        // Smashy/Multiembed are last-ditch alternates.
+        {
+          id: 'embed-su', label: 'embed.su',
+          movie: (id)        => `https://embed.su/embed/movie/${id}`,
+          tv:    (id, s, e)  => `https://embed.su/embed/tv/${id}/${s}/${e}`,
+        },
+        {
+          id: 'moviesapi', label: 'MoviesAPI',
+          movie: (id)        => `https://moviesapi.club/movie/${id}`,
+          tv:    (id, s, e)  => `https://moviesapi.club/tv/${id}-${s}-${e}`,
+        },
+        {
+          id: 'multiembed', label: 'MultiEmbed',
+          movie: (id)        => `https://multiembed.mov/?video_id=${id}&tmdb=1`,
+          tv:    (id, s, e)  => `https://multiembed.mov/?video_id=${id}&tmdb=1&s=${s}&e=${e}`,
+        },
+        {
+          id: 'smashystream', label: 'SmashyStream',
+          movie: (id)        => `https://embed.smashystream.com/playere.php?tmdb=${id}`,
+          tv:    (id, s, e)  => `https://embed.smashystream.com/playere.php?tmdb=${id}&season=${s}&episode=${e}`,
+        },
       ];
       const PROVIDER_KEY = 'inner.movies.provider';
       function getProvider() {
