@@ -3305,7 +3305,12 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           id: 'raccoon',
           name: 'Raccoon Game',
           tagline: 'Real AAA cloud streaming — GTA V, Spider-Man, Forza Horizon 5, Red Dead 2. Free with daily session caps; sign up with a burner email to extend.',
-          url: 'https://www.raccoongame.com/login',
+          // Point at the root, not /login. When the user has a valid
+          // session cookie (UV's __op IDB persists across reloads), the
+          // server redirects / -> dashboard automatically. Hard-coding
+          // /login would force the login form every refresh even when
+          // already authenticated.
+          url: 'https://www.raccoongame.com/',
           helperUrl: 'https://tempmail.ing/',
           helperLabel: 'Burner Email',
           logo: 'https://cdn.simpleicons.org/steam/FFFFFF',
@@ -3322,6 +3327,8 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           tips: [
             'Free tier has daily session caps — make a new account with a burner email to refresh',
             'The Burner Email panel on the left auto-loads tempmail.ing — copy the address shown there into the Raccoon signup',
+            'Sessions persist across page refreshes (UV stores Raccoon cookies in __op IDB)',
+            'If you DO see the login screen on refresh, your session expired — sign in again or grab a fresh burner email',
             'Real AAA streaming: GTA V, Spider-Man Miles Morales, Forza, RDR2, etc.',
             'Click "Refresh email" if you need a fresh inbox for another account',
             'This is the same upstream Cine-Cloud wraps — wired natively here so no third-party launcher dependency',
