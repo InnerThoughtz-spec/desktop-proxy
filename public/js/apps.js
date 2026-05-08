@@ -3563,6 +3563,98 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         timerEl.dataset.warn = '';
       }
 
+      // ---- Inner Cloud game catalog ----
+      // Cine-Cloud's "categories" are decoration — every card opens the
+      // same Raccoon iframe regardless of which game you click. We do
+      // the same: each card carries an appid + title for display only;
+      // launching takes you to the Raccoon login + tempmail sidebar.
+      // Cover images come from Steam's public library_hero / header CDN
+      // (shared.fastly.steamstatic.com) — the same source Cine-Cloud
+      // hotlinks. Hot-linkable, no auth, no API key.
+      const IC_GAMES = {
+        // Featured (hero card)
+        '1578380': { title: 'Blue Prince', tags: ['Puzzle', 'Strategy', 'Indie', 'Relaxing'], studio: 'Dogubom Studio' },
+        // Top picks
+        '271590':  { title: 'Grand Theft Auto V' },
+        '1245620': { title: 'Elden Ring' },
+        '2322010': { title: 'God of War: Ragnarök' },
+        '1817070': { title: "Marvel's Spider-Man Remastered" },
+        '1091500': { title: 'Cyberpunk 2077' },
+        '1293830': { title: 'Forza Horizon 4' },
+        '1426210': { title: 'It Takes Two' },
+        '1332010': { title: 'Stray' },
+        '870780':  { title: 'Control' },
+        // Poppy Playtime universe — same Steam IDs Cine-Cloud uses
+        '1721470': { title: 'Poppy Playtime: Chapter 1' },
+        '1721480': { title: 'Poppy Playtime: Chapter 2' },
+        '2125640': { title: 'Poppy Playtime: Chapter 3' },
+        '3030060': { title: 'Poppy Playtime: Chapter 4' },
+        // Racing & driving
+        '1222680': { title: 'Need for Speed: Payback' },
+        '1153410': { title: 'JDM: Japanese Drift Master' },
+        '635260':  { title: 'Drift Racing Online' },
+        '1692250': { title: 'Sim Racing Telemetry — F1 22' },
+        '269950':  { title: 'X-Plane 11' },
+        // Horror & thriller
+        '1238060': { title: 'Dead Space 3' },
+        '47780':   { title: 'Dead Space 2' },
+        '287290':  { title: 'Resident Evil: Revelations 2' },
+        '883710':  { title: 'Resident Evil 2: Remake' },
+        '1544020': { title: 'The Callisto Protocol' },
+        '1475810': { title: 'GhostWire: Tokyo' },
+        '2136470': { title: 'Little Nightmares III' },
+        '1766740': { title: 'Choo-Choo Charles' },
+        '2166060': { title: 'Amanda the Adventurer' },
+        // Simulation
+        '641320':  { title: 'Cooking Simulator' },
+        '2670630': { title: 'Supermarket Simulator' },
+        '1119730': { title: 'Ranch Simulator' },
+        '949230':  { title: 'Cities: Skylines II' },
+        '1363080': { title: 'Manor Lords' },
+        '1904540': { title: 'Football Manager 2023' },
+        '1601580': { title: 'Frostpunk 2' },
+        // Action & adventure
+        '447040':  { title: 'Watch Dogs 2' },
+        '2239550': { title: 'Watch Dogs: Legion' },
+        '1259420': { title: 'Days Gone' },
+        '1151640': { title: 'Horizon Zero Dawn' },
+        '1085660': { title: 'Destiny 2' },
+        '1252330': { title: 'Deathloop' },
+        '782330':  { title: 'Doom Eternal' },
+        '360430':  { title: 'Mafia III: Definitive Edition' },
+        '1030830': { title: 'Mafia II: Definitive Edition' },
+        // Co-op & casual
+        '1222700': { title: 'A Way Out' },
+        '728880':  { title: 'Overcooked 2' },
+        '1211020': { title: 'Wobbly Life' },
+        '1942280': { title: 'Brotato' },
+        '648800':  { title: 'Raft' },
+        '268910':  { title: 'Cuphead' },
+        '391540':  { title: 'Undertale' },
+        '818320':  { title: 'LEGO The Incredibles' },
+        '969990':  { title: 'SpongeBob: Battle for Bikini Bottom' },
+        '1282150': { title: 'SpongeBob: The Cosmic Shake' },
+        '1057090': { title: 'Ori and the Will of the Wisps' },
+        '1337010': { title: 'Alba: A Wildlife Adventure' },
+        '557340':  { title: 'My Friend Pedro' },
+      };
+      const IC_HERO_ID = '1578380';
+      const IC_SECTIONS = [
+        { title: 'Games We Recommend',    appids: ['271590', '1245620', '2322010', '1817070', '1091500', '1293830', '1426210', '1332010', '870780'] },
+        { title: 'Poppy Playtime Universe', appids: ['1721470', '1721480', '2125640', '3030060'] },
+        { title: 'Racing & Driving',      appids: ['1293830', '1222680', '1153410', '635260', '1692250', '269950'] },
+        { title: 'Action & Adventure',    appids: ['1817070', '271590', '1091500', '447040', '2239550', '1259420', '1151640', '1252330', '782330', '360430', '1030830', '1085660', '1332010'] },
+        { title: 'Horror & Thriller',     appids: ['1238060', '47780', '883710', '287290', '1544020', '1475810', '2136470', '1766740', '2166060'] },
+        { title: 'Simulation',            appids: ['641320', '2670630', '1119730', '949230', '1363080', '1904540', '1601580'] },
+        { title: 'Co-op & Casual',        appids: ['1426210', '1222700', '728880', '1211020', '1942280', '648800', '268910', '391540', '818320', '969990', '1282150', '1057090', '1337010', '557340'] },
+      ];
+      const steamHero   = (id) => `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${id}/library_hero.jpg`;
+      const steamHeader = (id) => `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${id}/header.jpg`;
+      const steamLogo   = (id) => `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${id}/logo.png`;
+
+      // Tab state for the bottom nav pill (Discover / Library / Tutorial).
+      let icTab = 'discover';
+
       function showHome() {
         backBtn.hidden = true;
         fsBtn.hidden = true;
@@ -3570,23 +3662,95 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         setStatus(null);
         stopTimer();
 
-        // Pull the headline service out for a hero treatment, then bin
-        // the rest into clean sections by access model. Layout mirrors
-        // streaming-launcher conventions — featured at the top with a
-        // big CTA, then category rows below.
-        const HERO_ID = 'raccoon';
+        const tabHTML = (id, label) =>
+          `<button class="ic-navtab ${icTab === id ? 'is-active' : ''}" data-tab="${id}">${label}</button>`;
+
+        let body = '';
+        if (icTab === 'discover')      body = renderDiscover();
+        else if (icTab === 'library')  body = renderLibrary();
+        else if (icTab === 'tutorial') body = renderTutorial();
+
+        stageEl.innerHTML = `
+          <div class="ic-shell">
+            <div class="ic-brand-badge">
+              <img src="https://cdn.simpleicons.org/steam/FFFFFF" alt="" referrerpolicy="no-referrer">
+              <span>INNER CLOUD</span>
+            </div>
+            <div class="ic-tab-content">${body}</div>
+            <nav class="ic-nav">
+              <div class="ic-nav-pill">
+                <img class="ic-nav-icon" src="https://cdn.simpleicons.org/steam/FFFFFF" alt="" referrerpolicy="no-referrer">
+                ${tabHTML('discover', 'Discover')}
+                ${tabHTML('library',  'Library')}
+                ${tabHTML('tutorial', 'Tutorial')}
+              </div>
+            </nav>
+          </div>`;
+
+        stageEl.querySelectorAll('[data-tab]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            icTab = btn.dataset.tab;
+            showHome();
+          });
+        });
+        stageEl.querySelectorAll('[data-game]').forEach((btn) => {
+          btn.addEventListener('click', () => playGame(btn.dataset.game));
+        });
+        stageEl.querySelectorAll('[data-launch]').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            const svc = SERVICES.find((s) => s.id === btn.dataset.launch);
+            if (svc) playService(svc);
+          });
+        });
+      }
+
+      function renderDiscover() {
+        const hero = IC_GAMES[IC_HERO_ID];
+        const heroBg = steamHero(IC_HERO_ID);
+        const heroLogo = steamLogo(IC_HERO_ID);
+        const heroHTML = hero ? `
+          <section class="ic-continue">
+            <h3 class="ic-row-label">▍Continue Playing</h3>
+            <button class="ic-hero-card" data-game="${IC_HERO_ID}">
+              <img class="ic-hero-art" src="${heroBg}" alt="" referrerpolicy="no-referrer" loading="eager">
+              <div class="ic-hero-overlay"></div>
+              <div class="ic-hero-meta">
+                <span class="ic-hero-tag">FEATURED</span>
+                <img class="ic-hero-logo" src="${heroLogo}" alt="${escapeHtml(hero.title)}" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('h1'),{className:'ic-hero-fallback-title',textContent:${JSON.stringify(hero.title)}}))">
+                ${hero.tags ? `<div class="ic-hero-tags">${hero.tags.map((t, i) => `${i ? '<span class="ic-dot">•</span>' : ''}<span>${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+                ${hero.studio ? `<div class="ic-hero-studio">${escapeHtml(hero.studio)}</div>` : ''}
+              </div>
+            </button>
+          </section>` : '';
+
+        const sectionsHTML = IC_SECTIONS.map((sec) => `
+          <section class="ic-row">
+            <h3 class="ic-row-label">▍${escapeHtml(sec.title)}</h3>
+            <div class="ic-row-scroll">
+              ${sec.appids.map((appid) => {
+                const g = IC_GAMES[appid];
+                if (!g) return '';
+                return `
+                  <button class="ic-card" data-game="${appid}" title="${escapeHtml(g.title)}">
+                    <img class="ic-card-art" src="${steamHeader(appid)}" alt="${escapeHtml(g.title)}" referrerpolicy="no-referrer" loading="lazy" onerror="this.style.display='none';this.nextElementSibling.classList.add('ic-card-art-fallback-show')">
+                    <div class="ic-card-art-fallback">${escapeHtml(g.title)}</div>
+                    <div class="ic-card-name">${escapeHtml(g.title)}</div>
+                  </button>`;
+              }).join('')}
+            </div>
+          </section>`).join('');
+
+        return heroHTML + sectionsHTML;
+      }
+
+      function renderLibrary() {
+        // The previous launcher tile grid lives here as the "Library"
+        // tab — services for users who want to bring their own paid
+        // sub (GFN, Xbox, Boosteroid, etc.) instead of using Raccoon.
         const FREE_IDS = ['joyark', 'cato', 'netboom', 'nowgg'];
         const SUB_IDS  = ['gfn', 'xbox', 'boosteroid', 'luna', 'shadow'];
-        const hero    = SERVICES.find((s) => s.id === HERO_ID);
-        const freeRow = FREE_IDS.map((id) => SERVICES.find((s) => s.id === id)).filter(Boolean);
-        const subRow  = SUB_IDS .map((id) => SERVICES.find((s) => s.id === id)).filter(Boolean);
-
-        // Tile renderer shared by both rows. Keeps existing logo+tier
-        // affordances; just lives inside the new section structure.
         const tileHTML = (s) => {
-          const tierLabel = s.tier === 'free' ? 'FREE'
-                          : s.tier === 'paid' ? 'SUB'
-                          : 'FREE / SUB';
+          const tierLabel = s.tier === 'free' ? 'FREE' : s.tier === 'paid' ? 'SUB' : 'FREE / SUB';
           return `
             <button class="ic-tile" data-launch="${s.id}" style="--ic-accent:${s.accent}">
               <div class="ic-tile-head">
@@ -3602,49 +3766,39 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
               <span class="ic-tile-cta">Launch ›</span>
             </button>`;
         };
-
-        const heroHTML = hero ? `
-          <button class="ic-hero" data-launch="${hero.id}" style="--ic-accent:${hero.accent}">
-            <div class="ic-hero-bg"></div>
-            <div class="ic-hero-body">
-              <span class="ic-hero-tag">FEATURED · FREE</span>
-              <h1 class="ic-hero-title">${escapeHtml(hero.name)}</h1>
-              <p class="ic-hero-blurb">Real AAA cloud streaming — GTA V, Spider-Man, Forza, Red Dead 2. Sign up with a burner email and play. Tempmail panel built right in.</p>
-              <span class="ic-hero-cta">▶ Launch</span>
-            </div>
-          </button>` : '';
-
-        const sectionHTML = (title, sub, list) => list.length ? `
-          <section class="ic-section">
-            <header class="ic-section-head">
-              <h2>${escapeHtml(title)}</h2>
-              <p>${escapeHtml(sub)}</p>
-            </header>
-            <div class="ic-grid">${list.map(tileHTML).join('')}</div>
-          </section>` : '';
-
-        stageEl.innerHTML = `
-          <div class="ic-discover">
-            ${heroHTML}
-            ${sectionHTML('Free Cloud Gaming', 'Earn-time models — daily play, extend with tasks or burner accounts. No credit card needed.', freeRow)}
-            ${sectionHTML('Subscription Services', 'Better stream quality, bigger catalogs, no time limits. Bring your own account.', subRow)}
-            <details class="ic-tutorial">
-              <summary>How Inner Cloud works</summary>
-              <div class="ic-tutorial-body">
-                <p><strong>Featured (Raccoon Game)</strong> — real cloud streaming on someone else's GPU. Free tier has session caps; the launcher pairs the player with a tempmail.ing sidebar so you can grab a disposable address and create a fresh account whenever your time runs out.</p>
-                <p><strong>Free Cloud Gaming</strong> — three TikTok-popular Asian-market services (JoyArk, CATO, NetBoom) plus Now.gg for casual mobile titles. Each has a daily free-time bucket extended by ads/tasks/referrals. Catalogs operate in legal grey areas; titles can vanish without notice.</p>
-                <p><strong>Subscription Services</strong> — GeForce NOW, Xbox Cloud, Boosteroid, Luna, Shadow PC. You bring your own account. Better latency, bigger catalogs, no daily caps. Iframing is hit-or-miss for these — proxy mode strips X-Frame-Options when needed; "Open in new tab" is the always-works fallback.</p>
-                <p><strong>Latency note:</strong> stream video itself is peer-to-peer WebRTC, untouched by the desktop's UV proxy. Proxy mode only adds a small click-latency hit on signaling — fine for everything except esports.</p>
-              </div>
-            </details>
+        const sectionHTML = (title, sub, ids) => {
+          const list = ids.map((id) => SERVICES.find((s) => s.id === id)).filter(Boolean);
+          if (!list.length) return '';
+          return `
+            <section class="ic-section">
+              <header class="ic-section-head">
+                <h2>${escapeHtml(title)}</h2>
+                <p>${escapeHtml(sub)}</p>
+              </header>
+              <div class="ic-grid">${list.map(tileHTML).join('')}</div>
+            </section>`;
+        };
+        return `
+          <div class="ic-library">
+            ${sectionHTML('Free Cloud Gaming', 'Earn-time models — daily play, extend with tasks or burner accounts. No credit card needed.', FREE_IDS)}
+            ${sectionHTML('Subscription Services', 'Better stream quality, bigger catalogs, no time limits. Bring your own account.', SUB_IDS)}
           </div>`;
+      }
 
-        stageEl.querySelectorAll('[data-launch]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            const svc = SERVICES.find((s) => s.id === btn.dataset.launch);
-            if (svc) playService(svc);
-          });
-        });
+      function renderTutorial() {
+        return `
+          <div class="ic-tutorial-page">
+            <h1>How Inner Cloud Works</h1>
+            <p>Inner Cloud is a launcher UI over real cloud-gaming infrastructure. Pick a game from the catalog, the launcher fullscreens into the streaming player.</p>
+            <h2>The Discover catalog</h2>
+            <p>Every game card opens the same player — a Cloudflare-edge cloud-gaming service that streams the actual game to your browser over WebRTC. The "categories" (Recommended, Racing, Horror, etc.) are curation; the underlying player is one shared iframe.</p>
+            <h2>Burner email cycling</h2>
+            <p>The player has a built-in <strong>BURNER EMAIL</strong> sidebar (powered by tempmail.ing). Free-tier sessions run out after the daily cap; when they do, hit ↻ on the burner panel for a fresh inbox, register a new account on the player, and keep playing. Same trick the TikTok wrappers use, just wired natively here.</p>
+            <h2>Library tab</h2>
+            <p>The Library has subscription / earn-time services for users who want to bring their own paid account — GeForce NOW, Xbox Cloud, Boosteroid, etc. Better latency and bigger catalogs, but you pay or grind for time.</p>
+            <h2>Cover art</h2>
+            <p>Game covers come from Steam's public library_hero CDN (the same source the original Cine-Cloud wrapper uses). Hot-linkable, no API key, free.</p>
+          </div>`;
       }
 
       // Track which mode each service is currently mounted with so the
@@ -3652,6 +3806,20 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       // svc reference. mode: 'proxy' | 'direct'.
       let currentSvc = null;
       let currentMode = null;
+
+      // Launching a game from the catalog reuses the Raccoon player
+      // (since every Cine-Cloud-style "category" actually points at the
+      // same upstream cloud-streaming service). We clone the raccoon
+      // service entry and override its display name with the game's
+      // title — that's what the player toolbar shows. The game itself
+      // gets selected inside Raccoon's UI after sign-in.
+      function playGame(appid) {
+        const game = IC_GAMES[appid];
+        if (!game) return;
+        const racc = SERVICES.find((s) => s.id === 'raccoon');
+        if (!racc) return;
+        playService({ ...racc, name: game.title });
+      }
 
       async function playService(svc, mode) {
         const targetMode = mode || svc.defaultMode || 'proxy';
