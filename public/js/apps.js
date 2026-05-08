@@ -3290,29 +3290,35 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       //   tier           — 'free' | 'paid' | 'mixed' badge on the tile.
       //   tips           — short bullets shown under the player iframe.
       const SERVICES = [
-        // ----- Cine-Cloud — the TikTok-popular UI aggregator. It's a
-        // Cloudflare Worker wrapper that iframes upstream HTML5 game
-        // catalogs (the operator credits "Raccoon Games" + others as
-        // the actual hosts; Cine Softwares positions itself as a "UI
-        // aggregator only"). Free, no signup, no time limit, runs in
-        // a single iframe at the wrapper's origin so X-Frame-Options
-        // doesn't block it. Direct mode works; proxy fallback as
-        // belt-and-braces. -----
+        // ----- Raccoon Game (raw upstream that Cine-Cloud wraps).
+        // Real cloud gaming — actual GTA V / Spider-Man / RDR2 / Forza
+        // streaming over WebRTC. Free tier with daily session limits;
+        // the trick that the TikTok wrappers use is "burner email
+        // cycling" — each new account gets a fresh trial, so you sign
+        // up with a tempmail address, use the trial, then grab a new
+        // tempmail and create another account. We render that flow
+        // natively: helperUrl puts a tempmail.ing iframe alongside the
+        // main player so the user can copy a disposable address
+        // without leaving Inner-OS. Same upstream Cine-Cloud uses, no
+        // dependency on their Cloudflare Worker wrapper. -----
         {
-          id: 'cine-cloud',
-          name: 'Cine-Cloud',
-          tagline: 'UI aggregator over a HTML5 game catalog (Poppy Playtime, Racing, Trending). Free, no signup, no time limit. Built as a Cloudflare Worker wrapper.',
-          url: 'https://cinesteam.cine-softwares.workers.dev/',
+          id: 'raccoon',
+          name: 'Raccoon Game',
+          tagline: 'Real AAA cloud streaming — GTA V, Spider-Man, Forza Horizon 5, Red Dead 2. Free with daily session caps; sign up with a burner email to extend.',
+          url: 'https://www.raccoongame.com/login',
+          helperUrl: 'https://tempmail.ing/',
+          helperLabel: 'Burner Email',
           logo: 'https://cdn.simpleicons.org/steam/FFFFFF',
-          accent: '#1B2838',
+          accent: '#FF6B6B',
           tier: 'free',
           defaultMode: 'direct',
           sessionLimitMin: null,
           tips: [
-            'No signup, no time limit — just open and play',
-            'Catalog is HTML5 games (Poppy Playtime Universe, Racing & Driving, Daily Picks, Trending Now) — not full AAA streaming',
-            'If a game is blank, it\'s the upstream provider being down — try another title',
-            'Operator: Cine Softwares (UI aggregator, not the game host)',
+            'Free tier has daily session caps — make a new account with a burner email to refresh',
+            'The Burner Email panel on the left auto-loads tempmail.ing — copy the address shown there into the Raccoon signup',
+            'Real AAA streaming: GTA V, Spider-Man Miles Morales, Forza, RDR2, etc.',
+            'Click "Refresh email" if you need a fresh inbox for another account',
+            'This is the same upstream Cine-Cloud wraps — wired natively here so no third-party launcher dependency',
           ],
         },
         // ----- Earn-time / free-trial services. These are the platforms
@@ -3668,14 +3674,37 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         if (currentSvc !== svc || currentMode !== targetMode) return;
 
         const tipsHTML = (svc.tips || []).map((t) => `<li>${escapeHtml(t)}</li>`).join('');
+        // Split-screen helper layout. Used by services like Raccoon
+        // Game where the user needs a disposable email service
+        // alongside the main player (burner-email cycling for free
+        // trials). The helper iframe gets a narrow sidebar (~320px),
+        // the main player takes the rest. A "Refresh" button lets
+        // the user reload the helper without touching the player.
+        const hasHelper = !!svc.helperUrl;
+        const helperHTML = hasHelper
+          ? `<aside class="cg-helper">
+               <div class="cg-helper-bar">
+                 <span class="cg-helper-label">${escapeHtml(svc.helperLabel || 'Helper')}</span>
+                 <button class="is-iconbtn is-btn-sm" data-act="cg-helper-refresh" title="Reload helper (get a fresh inbox)">↻</button>
+                 <a class="is-iconbtn is-btn-sm" href="${escapeHtml(svc.helperUrl)}" target="_blank" rel="noopener" title="Open helper in new tab">↗</a>
+               </div>
+               <iframe class="cg-helper-frame"
+                       src="${escapeHtml(svc.helperUrl)}"
+                       allow="clipboard-read; clipboard-write"
+                       referrerpolicy="no-referrer"></iframe>
+             </aside>`
+          : '';
         stageEl.innerHTML = `
-          <div class="cg-player">
+          <div class="cg-player ${hasHelper ? 'has-helper' : ''}">
             <div class="cg-player-bar">${titleHTML}</div>
-            <iframe class="cg-player-frame"
-                    src="${escapeHtml(frameSrc)}"
-                    allow="autoplay; fullscreen; gamepad; pointer-lock; clipboard-read; clipboard-write; encrypted-media; cross-origin-isolated; display-capture; web-share; xr-spatial-tracking"
-                    allowfullscreen
-                    referrerpolicy="no-referrer-when-downgrade"></iframe>
+            <div class="cg-player-body">
+              ${helperHTML}
+              <iframe class="cg-player-frame"
+                      src="${escapeHtml(frameSrc)}"
+                      allow="autoplay; fullscreen; gamepad; pointer-lock; clipboard-read; clipboard-write; encrypted-media; cross-origin-isolated; display-capture; web-share; xr-spatial-tracking"
+                      allowfullscreen
+                      referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
             <div class="cg-fallback">
               ${tipsHTML
                 ? `<details class="cg-tips" open><summary>Tips for ${escapeHtml(svc.name)}</summary><ul>${tipsHTML}</ul></details>`
@@ -3687,6 +3716,13 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
               </div>
             </div>
           </div>`;
+        // Wire the "refresh helper" button — reloads only the helper
+        // iframe (so the user can grab a fresh tempmail inbox without
+        // disturbing the game session in progress).
+        stageEl.querySelector('[data-act="cg-helper-refresh"]')?.addEventListener('click', () => {
+          const helperFrame = stageEl.querySelector('.cg-helper-frame');
+          if (helperFrame) helperFrame.src = svc.helperUrl + (svc.helperUrl.includes('?') ? '&' : '?') + '_cb=' + Date.now().toString(36);
+        });
 
         // Re-wire toggle on the new render.
         stageEl.querySelector('[data-act="cg-toggle-mode"]')?.addEventListener('click', () => {
