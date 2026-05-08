@@ -5,6 +5,73 @@ importScripts(__uv$config.sw || '/uv/uv.sw.js');
 
 const uv = new UVServiceWorker();
 
+// ---- UV cookie.getCookies hot-patch ----
+// UV v3.2.10 ships a `getCookies` (function `ja` in uv.bundle.js) that
+// blindly calls r.set.getTime() on every row in the __op IDB cookie
+// store. When even one row has a non-Date `set` (corrupted by an older
+// UV version, written by a userscript, or any cross-realm Date oddity),
+// the filter throws "TypeError: r.set.getTime is not a function" and
+// the entire request 500s with no body. The healUVCookies pass on the
+// page side fixes existing rows but can't prevent NEW corrupt entries
+// from being written after the heal runs.
+//
+// Replace the buggy getter with a defensive version that:
+//   - coerces non-Date `set` to a real Date when possible (string,
+//     number, plain object), OR drops the row if uncoercible
+//   - wraps the expiry math in try/catch so any per-row failure
+//     skips that cookie instead of poisoning the whole filter
+//   - keeps the same return contract UV expects
+//
+// uv.cookie.getCookies is a function reference assigned in the
+// Ultraviolet constructor; replacing it on the live instance is enough.
+if (uv && uv.cookie && typeof uv.cookie.getCookies === 'function') {
+  uv.cookie.getCookies = async function patchedGetCookies(db) {
+    const now = new Date();
+    let all;
+    try { all = await db.getAll('cookies'); }
+    catch { return []; }
+    const out = [];
+    for (const row of all) {
+      if (!row) continue;
+      // Normalize `set` — UV uses it for maxAge expiry math.
+      if (row.set != null && (!(row.set instanceof Date) || typeof row.set.getTime !== 'function')) {
+        const coerced = new Date(row.set);
+        if (Number.isFinite(coerced.getTime())) {
+          row.set = coerced;
+        } else {
+          // Uncoercible — drop the row so it can't poison future
+          // requests, then skip it.
+          try { await db.delete('cookies', row.id); } catch (_) {}
+          continue;
+        }
+      }
+      // Same defensive check for `expires`.
+      if (row.expires != null && !(row.expires instanceof Date)) {
+        const coerced = new Date(row.expires);
+        if (Number.isFinite(coerced.getTime())) row.expires = coerced;
+        else row.expires = null;
+      }
+      // Expiry math — any throw means we keep the cookie (safer than
+      // dropping a live session because a per-row field was unexpected).
+      let expired = false;
+      try {
+        if (row.set && row.maxAge) {
+          expired = row.set.getTime() + row.maxAge * 1000 < now;
+        } else if (row.expires instanceof Date) {
+          expired = row.expires < now;
+        }
+      } catch (_) { expired = false; }
+      if (expired) {
+        try { await db.delete('cookies', row.id); } catch (_) {}
+        continue;
+      }
+      out.push(row);
+    }
+    return out;
+  };
+  console.log('[uv-patch] cookie.getCookies wrapped — defensive against corrupt set/expires rows');
+}
+
 // --- Engine 2: Scramjet (experimental successor) ---
 // Optional — wrapped in try/catch so a missing scramjet install (e.g. on a
 // stripped-down deploy) doesn't break the UV path. If anything below throws,
