@@ -2475,3 +2475,246 @@ input, textarea { font: inherit; color: inherit; }
   .cg-grid { grid-template-columns: 1fr; }
   .cg-stage { padding: 12px 14px 18px; }
 }
+
+/* ===========================================================================
+   Inner Cloud — clean Cine-Cloud-style launcher.
+   Modifier classes on top of the existing .cg-* base. Hero card at the top
+   featuring Raccoon Game, then categorized rows (Free / Subscription) with
+   section headers + a collapsible tutorial. Background is near-black; cards
+   pick up an accent color via --ic-accent (set inline by the tile, derived
+   from each service's brand color). */
+
+/* Tighten the base topbar's shadow + slightly bigger wordmark glow */
+.ic-wordmark {
+  text-shadow: 0 0 12px rgba(125,200,255,.45), 0 0 28px rgba(125,200,255,.18);
+}
+.ic-wordmark b { color: #7dc8ff; }
+
+.ic-discover {
+  display: flex; flex-direction: column;
+  gap: 28px;
+  padding: 4px 0 24px;
+}
+
+/* Hero — big featured card. Whole thing is a button. */
+.ic-hero {
+  --ic-accent: #FF6B6B;
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 220px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: #0c1018;
+  color: #fff;
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+  transition: transform .14s var(--ease), box-shadow .15s var(--ease), border-color .15s var(--ease);
+}
+.ic-hero:hover,
+.ic-hero:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--ic-accent);
+  box-shadow: 0 18px 48px rgba(0,0,0,.55),
+              0 0 0 1px color-mix(in srgb, var(--ic-accent) 40%, transparent),
+              0 0 50px color-mix(in srgb, var(--ic-accent) 25%, transparent);
+  outline: none;
+}
+.ic-hero-bg {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(60% 100% at 80% 0%, color-mix(in srgb, var(--ic-accent) 30%, transparent), transparent 70%),
+    radial-gradient(80% 100% at 0% 100%, rgba(125,200,255,.18), transparent 60%),
+    linear-gradient(135deg, #0c1018 0%, #161c28 100%);
+  pointer-events: none;
+}
+.ic-hero-body {
+  position: relative;
+  padding: 36px 40px;
+  max-width: 720px;
+}
+.ic-hero-tag {
+  display: inline-block;
+  font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+  font-weight: 800;
+  color: var(--ic-accent);
+  background: color-mix(in srgb, var(--ic-accent) 18%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ic-accent) 50%, transparent);
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 14px;
+}
+.ic-hero-title {
+  font-size: 36px; font-weight: 800;
+  margin: 0 0 10px;
+  letter-spacing: -0.01em;
+  color: #fff;
+}
+.ic-hero-blurb {
+  font-size: 14px; line-height: 1.55;
+  color: rgba(255,255,255,.78);
+  margin: 0 0 22px;
+  max-width: 600px;
+}
+.ic-hero-cta {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 700;
+  padding: 10px 22px;
+  border-radius: 10px;
+  background: var(--ic-accent);
+  color: #fff;
+  letter-spacing: .02em;
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--ic-accent) 40%, transparent);
+  transition: transform .12s var(--ease), box-shadow .15s var(--ease);
+}
+.ic-hero:hover .ic-hero-cta { transform: translateX(2px); }
+
+/* Section — title + sub + grid */
+.ic-section {
+  display: flex; flex-direction: column;
+  gap: 14px;
+}
+.ic-section-head {
+  display: flex; flex-direction: column;
+  gap: 4px;
+  padding: 0 2px;
+}
+.ic-section-head h2 {
+  font-size: 18px; font-weight: 700;
+  color: #fff;
+  margin: 0;
+  letter-spacing: -0.005em;
+}
+.ic-section-head p {
+  font-size: 12.5px; line-height: 1.5;
+  color: rgba(255,255,255,.55);
+  margin: 0;
+}
+
+.ic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+/* Tile — same anatomy as .cg-tile but flatter typography + tighter spacing
+   to match the cleaner section-row aesthetic. */
+.ic-tile {
+  --ic-accent: #76B900;
+  position: relative;
+  display: flex; flex-direction: column; align-items: flex-start;
+  gap: 8px;
+  text-align: left;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.04);
+  border: 1px solid rgba(255,255,255,.07);
+  color: #fff;
+  cursor: pointer;
+  transition: transform .14s var(--ease), border-color .15s var(--ease),
+              box-shadow .15s var(--ease), background .15s var(--ease);
+  min-height: 168px;
+}
+.ic-tile:hover,
+.ic-tile:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--ic-accent);
+  background: rgba(255,255,255,.06);
+  box-shadow: 0 12px 28px rgba(0,0,0,.45),
+              0 0 0 1px color-mix(in srgb, var(--ic-accent) 35%, transparent),
+              0 0 24px color-mix(in srgb, var(--ic-accent) 25%, transparent);
+  outline: none;
+}
+.ic-tile-head {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%;
+  gap: 10px;
+}
+.ic-tile-tier {
+  font-size: 9.5px; letter-spacing: .14em;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.7);
+  white-space: nowrap;
+}
+.ic-tile-tier[data-tier="free"]  { color: #5ce2a0; border-color: rgba(92,226,160,.45); background: rgba(92,226,160,.08); }
+.ic-tile-tier[data-tier="paid"]  { color: #ffd166; border-color: rgba(255,209,102,.45); background: rgba(255,209,102,.08); }
+.ic-tile-tier[data-tier="mixed"] { color: var(--ic-accent); border-color: color-mix(in srgb, var(--ic-accent) 45%, transparent); background: color-mix(in srgb, var(--ic-accent) 10%, transparent); }
+
+.ic-tile-logo {
+  width: 48px; height: 48px;
+  border-radius: 10px;
+  background: rgba(0,0,0,.4);
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid rgba(255,255,255,.06);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.ic-tile-logo img {
+  width: 32px; height: 32px;
+  object-fit: contain;
+}
+.ic-tile-logo-fallback {
+  width: 100%; height: 100%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; font-weight: 800;
+  color: var(--ic-accent);
+  background: rgba(255,255,255,.04);
+}
+.ic-tile-name {
+  font-size: 15px; font-weight: 700;
+  color: #fff;
+}
+.ic-tile-tagline {
+  font-size: 12px; line-height: 1.45;
+  color: rgba(255,255,255,.6);
+}
+.ic-tile-cta {
+  margin-top: auto;
+  font-size: 11px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ic-accent);
+  font-weight: 700;
+}
+
+/* Tutorial — collapsible explainer at the bottom of the discover view */
+.ic-tutorial {
+  margin-top: 8px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+  border: 1px solid rgba(255,255,255,.06);
+}
+.ic-tutorial summary {
+  cursor: pointer;
+  font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+  font-weight: 700;
+  color: rgba(125,200,255,.85);
+  list-style: none;
+  display: flex; align-items: center; gap: 8px;
+}
+.ic-tutorial summary::-webkit-details-marker { display: none; }
+.ic-tutorial summary::before {
+  content: '▸';
+  display: inline-block;
+  transition: transform .14s var(--ease);
+}
+.ic-tutorial[open] summary::before { transform: rotate(90deg); }
+.ic-tutorial-body {
+  margin-top: 14px;
+  display: flex; flex-direction: column; gap: 10px;
+  font-size: 12.5px; line-height: 1.55;
+  color: rgba(255,255,255,.7);
+}
+.ic-tutorial-body p { margin: 0; }
+.ic-tutorial-body strong { color: #fff; }
+
+@media (max-width: 760px) {
+  .ic-hero-body { padding: 24px 20px; }
+  .ic-hero-title { font-size: 26px; }
+  .ic-hero-blurb { font-size: 13px; }
+  .ic-grid { grid-template-columns: 1fr; }
+}

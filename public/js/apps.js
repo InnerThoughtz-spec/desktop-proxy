@@ -99,7 +99,7 @@
     { slug: 'inner-movies',  name: 'InnerMovies',  appId: 'inner-movies',  iconURL: 'https://cdn.simpleicons.org/netflix/E50914' },
     { slug: 'inner-arcade',  name: 'InnerArcade',  appId: 'inner-arcade',  iconURL: 'https://cdn.simpleicons.org/playstation/FFFFFF' },
     { slug: 'inntify',       name: 'Inntify',      appId: 'inntify',       iconURL: 'https://cdn.simpleicons.org/spotify/1DB954' },
-    { slug: 'cloud-gaming',  name: 'Cloud Gaming', appId: 'cloud-gaming',  iconURL: 'https://cdn.simpleicons.org/steam/FFFFFF' },
+    { slug: 'cloud-gaming',  name: 'Inner Cloud',  appId: 'cloud-gaming',  iconURL: 'https://cdn.simpleicons.org/steam/FFFFFF' },
     { slug: 'youtube',     name: 'YouTube',     url: 'https://www.youtube.com/',          color: 'FF0000' },
     { slug: 'discord',     name: 'Discord',     url: 'https://discord.com/app',           color: '5865F2' },
     { slug: 'github',      name: 'GitHub',      url: 'https://github.com/',               color: 'FFFFFF' },
@@ -3277,7 +3277,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
   // initial page load + signaling, since most providers send
   // X-Frame-Options: DENY (UV strips it).
   OS.registerApp('cloud-gaming', {
-    title: 'Cloud Gaming',
+    title: 'Inner Cloud',
     glyphURL: 'https://cdn.simpleicons.org/steam/FFFFFF',
     singleInstance: true,
     defaultW: 1180, defaultH: 760,
@@ -3488,10 +3488,10 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       ];
 
       root.innerHTML = `
-        <div class="cg-app">
-          <div class="cg-topbar" data-drag-handle>
+        <div class="cg-app ic-app">
+          <div class="cg-topbar ic-topbar" data-drag-handle>
             <button class="is-iconbtn" data-act="cg-back" hidden title="Back to launcher">‹</button>
-            <div class="cg-wordmark">Cloud<b>Gaming</b></div>
+            <div class="cg-wordmark ic-wordmark">Inner<b>Cloud</b></div>
             <div class="cg-status" data-role="status" hidden></div>
             <div class="cg-timer" data-role="timer" hidden></div>
             <div style="flex:1"></div>
@@ -3569,33 +3569,76 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         reloadBtn.hidden = true;
         setStatus(null);
         stopTimer();
-        stageEl.innerHTML = `
-          <div class="cg-grid">
-            ${SERVICES.map((s) => {
-              const tierLabel = s.tier === 'free' ? 'FREE'
-                              : s.tier === 'paid' ? 'SUB'
-                              : 'FREE / SUB';
-              return `
-              <button class="cg-tile" data-launch="${s.id}" style="--cg-accent:${s.accent}">
-                <div class="cg-tile-head">
-                  <div class="cg-tile-logo">
-                    ${s.logo
-                      ? `<img src="${escapeHtml(s.logo)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'cg-tile-logo-fallback',textContent:'${escapeHtml(s.name.charAt(0))}'}))">`
-                      : `<div class="cg-tile-logo-fallback">${escapeHtml(s.name.charAt(0))}</div>`}
-                  </div>
-                  <span class="cg-tile-tier" data-tier="${s.tier}">${tierLabel}</span>
+
+        // Pull the headline service out for a hero treatment, then bin
+        // the rest into clean sections by access model. Layout mirrors
+        // streaming-launcher conventions — featured at the top with a
+        // big CTA, then category rows below.
+        const HERO_ID = 'raccoon';
+        const FREE_IDS = ['joyark', 'cato', 'netboom', 'nowgg'];
+        const SUB_IDS  = ['gfn', 'xbox', 'boosteroid', 'luna', 'shadow'];
+        const hero    = SERVICES.find((s) => s.id === HERO_ID);
+        const freeRow = FREE_IDS.map((id) => SERVICES.find((s) => s.id === id)).filter(Boolean);
+        const subRow  = SUB_IDS .map((id) => SERVICES.find((s) => s.id === id)).filter(Boolean);
+
+        // Tile renderer shared by both rows. Keeps existing logo+tier
+        // affordances; just lives inside the new section structure.
+        const tileHTML = (s) => {
+          const tierLabel = s.tier === 'free' ? 'FREE'
+                          : s.tier === 'paid' ? 'SUB'
+                          : 'FREE / SUB';
+          return `
+            <button class="ic-tile" data-launch="${s.id}" style="--ic-accent:${s.accent}">
+              <div class="ic-tile-head">
+                <div class="ic-tile-logo">
+                  ${s.logo
+                    ? `<img src="${escapeHtml(s.logo)}" alt="" referrerpolicy="no-referrer" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'ic-tile-logo-fallback',textContent:'${escapeHtml(s.name.charAt(0))}'}))">`
+                    : `<div class="ic-tile-logo-fallback">${escapeHtml(s.name.charAt(0))}</div>`}
                 </div>
-                <div class="cg-tile-name">${escapeHtml(s.name)}</div>
-                <div class="cg-tile-tagline">${escapeHtml(s.tagline)}</div>
-                <span class="cg-tile-cta">Launch ›</span>
-              </button>`;
-            }).join('')}
-          </div>
-          <div class="cg-note">
-            <strong>How this works:</strong> the actual games run on each service's GPU servers; your browser receives a video stream over WebRTC peer-to-peer. You sign in with your own account on each platform — Inner-OS doesn't host games or relay streams. Most providers refuse iframing, so the launcher loads them through the desktop's UV proxy, which strips <code>X-Frame-Options</code>. Stream latency is unaffected by the proxy because WebRTC bypasses it.
-            <br><br>
-            <strong>Two categories above:</strong> the first three (JoyArk, CATO, NetBoom) are free-with-daily-time services — best fit for "play GTA V right now without a sub." Daily free time is ~30-60 min; extend by completing tasks. The rest (GeForce NOW, Xbox, Boosteroid, Luna, Shadow) are subscription-based and offer better stream quality + bigger catalogs.
+                <span class="ic-tile-tier" data-tier="${s.tier}">${tierLabel}</span>
+              </div>
+              <div class="ic-tile-name">${escapeHtml(s.name)}</div>
+              <div class="ic-tile-tagline">${escapeHtml(s.tagline)}</div>
+              <span class="ic-tile-cta">Launch ›</span>
+            </button>`;
+        };
+
+        const heroHTML = hero ? `
+          <button class="ic-hero" data-launch="${hero.id}" style="--ic-accent:${hero.accent}">
+            <div class="ic-hero-bg"></div>
+            <div class="ic-hero-body">
+              <span class="ic-hero-tag">FEATURED · FREE</span>
+              <h1 class="ic-hero-title">${escapeHtml(hero.name)}</h1>
+              <p class="ic-hero-blurb">Real AAA cloud streaming — GTA V, Spider-Man, Forza, Red Dead 2. Sign up with a burner email and play. Tempmail panel built right in.</p>
+              <span class="ic-hero-cta">▶ Launch</span>
+            </div>
+          </button>` : '';
+
+        const sectionHTML = (title, sub, list) => list.length ? `
+          <section class="ic-section">
+            <header class="ic-section-head">
+              <h2>${escapeHtml(title)}</h2>
+              <p>${escapeHtml(sub)}</p>
+            </header>
+            <div class="ic-grid">${list.map(tileHTML).join('')}</div>
+          </section>` : '';
+
+        stageEl.innerHTML = `
+          <div class="ic-discover">
+            ${heroHTML}
+            ${sectionHTML('Free Cloud Gaming', 'Earn-time models — daily play, extend with tasks or burner accounts. No credit card needed.', freeRow)}
+            ${sectionHTML('Subscription Services', 'Better stream quality, bigger catalogs, no time limits. Bring your own account.', subRow)}
+            <details class="ic-tutorial">
+              <summary>How Inner Cloud works</summary>
+              <div class="ic-tutorial-body">
+                <p><strong>Featured (Raccoon Game)</strong> — real cloud streaming on someone else's GPU. Free tier has session caps; the launcher pairs the player with a tempmail.ing sidebar so you can grab a disposable address and create a fresh account whenever your time runs out.</p>
+                <p><strong>Free Cloud Gaming</strong> — three TikTok-popular Asian-market services (JoyArk, CATO, NetBoom) plus Now.gg for casual mobile titles. Each has a daily free-time bucket extended by ads/tasks/referrals. Catalogs operate in legal grey areas; titles can vanish without notice.</p>
+                <p><strong>Subscription Services</strong> — GeForce NOW, Xbox Cloud, Boosteroid, Luna, Shadow PC. You bring your own account. Better latency, bigger catalogs, no daily caps. Iframing is hit-or-miss for these — proxy mode strips X-Frame-Options when needed; "Open in new tab" is the always-works fallback.</p>
+                <p><strong>Latency note:</strong> stream video itself is peer-to-peer WebRTC, untouched by the desktop's UV proxy. Proxy mode only adds a small click-latency hit on signaling — fine for everything except esports.</p>
+              </div>
+            </details>
           </div>`;
+
         stageEl.querySelectorAll('[data-launch]').forEach((btn) => {
           btn.addEventListener('click', () => {
             const svc = SERVICES.find((s) => s.id === btn.dataset.launch);
