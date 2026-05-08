@@ -3311,7 +3311,13 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           logo: 'https://cdn.simpleicons.org/steam/FFFFFF',
           accent: '#FF6B6B',
           tier: 'free',
-          defaultMode: 'direct',
+          // Default to proxy: routes the iframe through UV so it shares
+          // origin with inneros.dpdns.org. That makes Raccoon's session
+          // cookies first-party from the browser's perspective and
+          // dodges Chrome's third-party-cookie blocking which was
+          // bouncing the user back to /login after every successful
+          // sign-in.
+          defaultMode: 'proxy',
           sessionLimitMin: null,
           tips: [
             'Free tier has daily session caps — make a new account with a burner email to refresh',
@@ -3901,6 +3907,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
                </div>
                <iframe class="cg-helper-frame"
                        src="${escapeHtml(svc.helperUrl)}"
+                       sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals"
                        allow="clipboard-read; clipboard-write"
                        referrerpolicy="no-referrer"></iframe>
              </aside>`
@@ -3912,6 +3919,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
               ${helperHTML}
               <iframe class="cg-player-frame"
                       src="${escapeHtml(frameSrc)}"
+                      sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-modals allow-pointer-lock allow-presentation allow-orientation-lock allow-downloads"
                       allow="autoplay; fullscreen; gamepad; pointer-lock; clipboard-read; clipboard-write; encrypted-media; cross-origin-isolated; display-capture; web-share; xr-spatial-tracking"
                       allowfullscreen
                       referrerpolicy="no-referrer-when-downgrade"></iframe>
