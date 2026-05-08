@@ -99,7 +99,7 @@
     { slug: 'inner-movies',  name: 'InnerMovies',  appId: 'inner-movies',  iconURL: 'https://cdn.simpleicons.org/netflix/E50914' },
     { slug: 'inner-arcade',  name: 'InnerArcade',  appId: 'inner-arcade',  iconURL: 'https://cdn.simpleicons.org/playstation/FFFFFF' },
     { slug: 'inntify',       name: 'Inntify',      appId: 'inntify',       iconURL: 'https://cdn.simpleicons.org/spotify/1DB954' },
-    { slug: 'cloud-gaming',  name: 'Cloud Gaming', appId: 'cloud-gaming',  iconURL: 'https://cdn.simpleicons.org/nvidia/76B900' },
+    { slug: 'cloud-gaming',  name: 'Cloud Gaming', appId: 'cloud-gaming',  iconURL: 'https://cdn.simpleicons.org/steam/FFFFFF' },
     { slug: 'youtube',     name: 'YouTube',     url: 'https://www.youtube.com/',          color: 'FF0000' },
     { slug: 'discord',     name: 'Discord',     url: 'https://discord.com/app',           color: '5865F2' },
     { slug: 'github',      name: 'GitHub',      url: 'https://github.com/',               color: 'FFFFFF' },
@@ -3278,7 +3278,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
   // X-Frame-Options: DENY (UV strips it).
   OS.registerApp('cloud-gaming', {
     title: 'Cloud Gaming',
-    glyphURL: 'https://cdn.simpleicons.org/nvidia/76B900',
+    glyphURL: 'https://cdn.simpleicons.org/steam/FFFFFF',
     singleInstance: true,
     defaultW: 1180, defaultH: 760,
     mount(root) {
@@ -3290,6 +3290,31 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
       //   tier           — 'free' | 'paid' | 'mixed' badge on the tile.
       //   tips           — short bullets shown under the player iframe.
       const SERVICES = [
+        // ----- Cine-Cloud — the TikTok-popular UI aggregator. It's a
+        // Cloudflare Worker wrapper that iframes upstream HTML5 game
+        // catalogs (the operator credits "Raccoon Games" + others as
+        // the actual hosts; Cine Softwares positions itself as a "UI
+        // aggregator only"). Free, no signup, no time limit, runs in
+        // a single iframe at the wrapper's origin so X-Frame-Options
+        // doesn't block it. Direct mode works; proxy fallback as
+        // belt-and-braces. -----
+        {
+          id: 'cine-cloud',
+          name: 'Cine-Cloud',
+          tagline: 'UI aggregator over a HTML5 game catalog (Poppy Playtime, Racing, Trending). Free, no signup, no time limit. Built as a Cloudflare Worker wrapper.',
+          url: 'https://cinesteam.cine-softwares.workers.dev/',
+          logo: 'https://cdn.simpleicons.org/steam/FFFFFF',
+          accent: '#1B2838',
+          tier: 'free',
+          defaultMode: 'direct',
+          sessionLimitMin: null,
+          tips: [
+            'No signup, no time limit — just open and play',
+            'Catalog is HTML5 games (Poppy Playtime Universe, Racing & Driving, Daily Picks, Trending Now) — not full AAA streaming',
+            'If a game is blank, it\'s the upstream provider being down — try another title',
+            'Operator: Cine Softwares (UI aggregator, not the game host)',
+          ],
+        },
         // ----- Earn-time / free-trial services. These are the platforms
         // that show up on TikTok demos with "GTA V free, no time limit"
         // claims. Reality: each has a daily free-time bucket (typically
