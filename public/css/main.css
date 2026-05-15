@@ -2976,3 +2976,151 @@ input, textarea { font: inherit; color: inherit; }
    .cg-player layout already does this; we just want to make sure the
    topbar comes back. */
 .cg-app:has(.cg-player) .cg-topbar { display: flex; }
+
+/* ===========================================================================
+   Inner Cloud — per-game detail page.
+   Sits between the catalog and the player. Standard launcher pattern:
+   full-bleed hero artwork, title overlay, developer + tags + release
+   date chips, short description, screenshot strip, big launch button.
+   ========================================================================= */
+.ic-detail {
+  position: absolute; inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: #07090d;
+  color: #fff;
+}
+.ic-detail-hero {
+  position: relative;
+  width: 100%;
+  height: 380px;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1a2138, #0b0e16);
+}
+.ic-detail-hero-art {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+}
+.ic-detail-hero-overlay {
+  position: absolute; inset: 0;
+  background:
+    linear-gradient(180deg, rgba(7,9,13,.35) 0%, rgba(7,9,13,.55) 50%, #07090d 100%),
+    linear-gradient(90deg, rgba(7,9,13,.6) 0%, transparent 50%);
+}
+.ic-detail-body {
+  position: relative;
+  margin-top: -120px;
+  padding: 0 40px 80px;
+  z-index: 1;
+}
+.ic-detail-title {
+  font-size: 44px; font-weight: 800;
+  letter-spacing: -0.02em;
+  margin: 0 0 16px;
+  text-shadow: 0 2px 18px rgba(0,0,0,.7);
+}
+.ic-detail-meta {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-bottom: 18px;
+  min-height: 28px;
+}
+.ic-detail-chip {
+  display: inline-flex; align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.1);
+  font-size: 12px; font-weight: 600;
+  color: rgba(255,255,255,.85);
+}
+.ic-detail-chip.ic-detail-dev {
+  color: #7dc8ff;
+  border-color: rgba(125,200,255,.4);
+  background: rgba(125,200,255,.08);
+}
+.ic-detail-chip.ic-detail-tag {
+  color: rgba(255,255,255,.7);
+}
+.ic-detail-loading {
+  font-size: 12px;
+  color: rgba(255,255,255,.55);
+}
+.ic-detail-desc {
+  font-size: 14px; line-height: 1.65;
+  color: rgba(255,255,255,.78);
+  max-width: 760px;
+  margin: 0 0 24px;
+  min-height: 22px;
+}
+.ic-detail-actions {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 36px;
+}
+.ic-detail-launch {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 14px 28px;
+  font-size: 15px; font-weight: 700;
+  letter-spacing: .01em;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #FF6B6B, #ff8a8a);
+  color: #fff;
+  border: 0;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(255,107,107,.35);
+  transition: transform .12s var(--ease), box-shadow .15s var(--ease);
+}
+.ic-detail-launch:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 32px rgba(255,107,107,.45);
+}
+.ic-detail-launch-icon {
+  font-size: 14px;
+}
+.ic-detail-shots-label {
+  font-size: 13px; font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .12em;
+  color: rgba(255,255,255,.55);
+  margin: 0 0 12px;
+}
+.ic-detail-shots-row {
+  display: flex; gap: 12px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,.18) transparent;
+}
+.ic-detail-shots-row::-webkit-scrollbar { height: 6px; }
+.ic-detail-shots-row::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,.15);
+  border-radius: 3px;
+}
+.ic-detail-shot {
+  flex: 0 0 320px;
+  display: block;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,.06);
+  background: #14181f;
+  transition: transform .14s var(--ease), border-color .15s var(--ease);
+}
+.ic-detail-shot:hover {
+  transform: translateY(-2px);
+  border-color: rgba(255,255,255,.22);
+}
+.ic-detail-shot img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+}
+
+@media (max-width: 760px) {
+  .ic-detail-hero { height: 240px; }
+  .ic-detail-body { padding: 0 18px 60px; margin-top: -80px; }
+  .ic-detail-title { font-size: 28px; }
+  .ic-detail-launch { padding: 12px 22px; font-size: 14px; }
+  .ic-detail-shot { flex: 0 0 240px; }
+}

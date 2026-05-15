@@ -3707,7 +3707,7 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           });
         });
         stageEl.querySelectorAll('[data-game]').forEach((btn) => {
-          btn.addEventListener('click', () => playGame(btn.dataset.game));
+          btn.addEventListener('click', () => showGameDetail(btn.dataset.game));
         });
         stageEl.querySelectorAll('[data-launch]').forEach((btn) => {
           btn.addEventListener('click', () => {
@@ -3832,6 +3832,89 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
         const racc = SERVICES.find((s) => s.id === 'raccoon');
         if (!racc) return;
         playService({ ...racc, name: game.title });
+      }
+
+      // Detail page for a single game — sits between the catalog and the
+      // player. Renders a steam-style splash: full-bleed hero artwork,
+      // title overlay, developer + tags + release date, short description,
+      // screenshot strip, and a big Launch button. Standard launcher
+      // pattern (Steam, Epic, GOG, Xbox all do this). Metadata comes
+      // from /api/cloud/game/:appid which proxies Steam's public
+      // appdetails endpoint with 24h server cache.
+      async function showGameDetail(appid) {
+        const local = IC_GAMES[appid] || {};
+        backBtn.hidden = false;
+        fsBtn.hidden = true;
+        reloadBtn.hidden = true;
+        setStatus(null);
+        stopTimer();
+
+        // Initial render with what we already know locally so the page
+        // feels instant. Metadata + screenshots fill in async.
+        stageEl.innerHTML = `
+          <div class="ic-detail" data-appid="${escapeHtml(appid)}">
+            <div class="ic-detail-hero">
+              <img class="ic-detail-hero-art" src="${steamHero(appid)}" alt="" referrerpolicy="no-referrer" loading="eager"
+                   onerror="this.style.display='none'">
+              <div class="ic-detail-hero-overlay"></div>
+            </div>
+            <div class="ic-detail-body">
+              <h1 class="ic-detail-title">${escapeHtml(local.title || 'Loading…')}</h1>
+              <div class="ic-detail-meta" data-role="meta">
+                <span class="ic-detail-loading">Loading details…</span>
+              </div>
+              <p class="ic-detail-desc" data-role="desc"></p>
+              <div class="ic-detail-actions">
+                <button class="ic-detail-launch" data-act="launch">
+                  <span class="ic-detail-launch-icon">▶</span>
+                  <span>Launch on Inner Cloud</span>
+                </button>
+              </div>
+              <div class="ic-detail-shots" data-role="shots"></div>
+            </div>
+          </div>`;
+        stageEl.querySelector('[data-act="launch"]')?.addEventListener('click', () => playGame(appid));
+
+        // Fetch fresh metadata. Failure leaves the placeholder copy in
+        // place — Launch button still works regardless.
+        try {
+          const r = await fetch(`/api/cloud/game/${encodeURIComponent(appid)}`);
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          const data = await r.json();
+          if (!data || !data.available) {
+            const meta = stageEl.querySelector('[data-role="meta"]');
+            if (meta) meta.innerHTML = '<span class="ic-detail-loading">Steam metadata not available for this title.</span>';
+            return;
+          }
+          // Live data — update title if Steam disagrees with our local cache.
+          if (data.title) {
+            const titleEl = stageEl.querySelector('.ic-detail-title');
+            if (titleEl) titleEl.textContent = data.title;
+          }
+          const meta = stageEl.querySelector('[data-role="meta"]');
+          if (meta) {
+            const dev   = data.developers.length ? `<span class="ic-detail-chip ic-detail-dev">${escapeHtml(data.developers.slice(0, 2).join(' · '))}</span>` : '';
+            const date  = data.releaseDate ? `<span class="ic-detail-chip">${data.comingSoon ? 'Coming ' : ''}${escapeHtml(data.releaseDate)}</span>` : '';
+            const tags  = data.genres.slice(0, 5).map((g) => `<span class="ic-detail-chip ic-detail-tag">${escapeHtml(g)}</span>`).join('');
+            meta.innerHTML = `${dev}${date}${tags}`;
+          }
+          const desc = stageEl.querySelector('[data-role="desc"]');
+          if (desc) desc.textContent = data.description || '';
+          const shots = stageEl.querySelector('[data-role="shots"]');
+          if (shots && data.screenshots.length) {
+            shots.innerHTML = `
+              <h3 class="ic-detail-shots-label">Screenshots</h3>
+              <div class="ic-detail-shots-row">
+                ${data.screenshots.map((s) => `
+                  <a class="ic-detail-shot" href="${escapeHtml(s.full)}" target="_blank" rel="noopener" title="Open full-size">
+                    <img src="${escapeHtml(s.thumb)}" alt="" referrerpolicy="no-referrer" loading="lazy">
+                  </a>`).join('')}
+              </div>`;
+          }
+        } catch (e) {
+          const meta = stageEl.querySelector('[data-role="meta"]');
+          if (meta) meta.innerHTML = `<span class="ic-detail-loading" style="color:#ff8a8a">Couldn't load Steam metadata: ${escapeHtml(e.message)}</span>`;
+        }
       }
 
       async function playService(svc, mode) {

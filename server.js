@@ -1452,6 +1452,60 @@ app.get('/api/arcade/games', async (_req, res) => {
   }
 });
 
+// ---------- Inner Cloud — Steam app metadata proxy ----------
+// Fetches public game metadata from Steam's appdetails endpoint so the
+// Inner Cloud detail view can show real developer / publisher /
+// description / screenshots / release date for any Steam app ID. Cached
+// in-memory for 24h since game metadata is mostly static and Steam
+// rate-limits to ~200 req / 5 min per IP. The shape we return is the
+// minimum the client needs; the full Steam response is much larger.
+const STEAM_META_TTL = 24 * 60 * 60 * 1000;
+const steamMetaCache = new Map(); // appid -> { ts, data }
+app.get('/api/cloud/game/:appid', async (req, res) => {
+  const appid = String(req.params.appid || '').replace(/[^0-9]/g, '');
+  if (!appid) return res.status(400).json({ error: 'bad_appid' });
+  const hit = steamMetaCache.get(appid);
+  if (hit && (Date.now() - hit.ts) < STEAM_META_TTL) {
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    return res.json(hit.data);
+  }
+  try {
+    const r = await fetch(`https://store.steampowered.com/api/appdetails?appids=${appid}&filters=basic,screenshots,genres,categories,release_date`, {
+      headers: { 'user-agent': 'Mozilla/5.0', 'accept': 'application/json' },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return res.status(502).json({ error: 'steam_unavailable', detail: `HTTP ${r.status}` });
+    const json = await r.json();
+    const entry = json[appid];
+    if (!entry || !entry.success) {
+      const out = { appid, available: false };
+      steamMetaCache.set(appid, { ts: Date.now(), data: out });
+      return res.json(out);
+    }
+    const d = entry.data || {};
+    const out = {
+      appid,
+      available: true,
+      title:        d.name || '',
+      headerImage:  d.header_image || '',
+      description:  d.short_description || '',
+      developers:   Array.isArray(d.developers)  ? d.developers  : [],
+      publishers:   Array.isArray(d.publishers)  ? d.publishers  : [],
+      genres:       Array.isArray(d.genres)      ? d.genres.map((g) => g.description).filter(Boolean) : [],
+      categories:   Array.isArray(d.categories)  ? d.categories.map((c) => c.description).filter(Boolean).slice(0, 6) : [],
+      releaseDate:  d.release_date?.date || '',
+      comingSoon:   !!d.release_date?.coming_soon,
+      screenshots:  Array.isArray(d.screenshots) ? d.screenshots.slice(0, 8).map((s) => ({ thumb: s.path_thumbnail, full: s.path_full })) : [],
+    };
+    steamMetaCache.set(appid, { ts: Date.now(), data: out });
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.json(out);
+  } catch (e) {
+    console.error('[cloud/game]', appid, e.message);
+    res.status(502).json({ error: 'fetch_failed', detail: e.message });
+  }
+});
+
 app.use(express.static(path.join(__dirname, 'public'), { extensions: ['html'] }));
 
 app.get('/healthz', (_req, res) => res.json({ ok: true }));
