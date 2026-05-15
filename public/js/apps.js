@@ -3316,13 +3316,14 @@ ${favicon ? `<link rel="icon" href="${escapeHtml(favicon)}">` : ''}
           logo: 'https://cdn.simpleicons.org/steam/FFFFFF',
           accent: '#FF6B6B',
           tier: 'free',
-          // Default to proxy: routes the iframe through UV so it shares
-          // origin with inneros.dpdns.org. That makes Raccoon's session
-          // cookies first-party from the browser's perspective and
-          // dodges Chrome's third-party-cookie blocking which was
-          // bouncing the user back to /login after every successful
-          // sign-in.
-          defaultMode: 'proxy',
+          // Default to direct: raccoongame.com doesn't set X-Frame-Options
+          // and iframes cleanly without a proxy. Going direct means
+          // cookies are first-party at raccoon's own origin (browser
+          // handles them normally) instead of being stashed in UV's
+          // __op IDB — which is where the recurring "r.set.getTime is
+          // not a function" 500s come from. If raccoon ever starts
+          // blocking iframes, flip to proxy via the player toolbar.
+          defaultMode: 'direct',
           sessionLimitMin: null,
           tips: [
             'Free tier has daily session caps — make a new account with a burner email to refresh',
